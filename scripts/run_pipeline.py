@@ -1,4 +1,4 @@
-"""NexusBI - Full Pipeline Orchestrator.
+"""Lucciola - Full Pipeline Orchestrator.
 
 Usage::
 
@@ -65,8 +65,8 @@ def _legacy_sales_frame(frame: Optional[pd.DataFrame]) -> pd.DataFrame:
     sales["Invoice_ID"] = sales["transaction_id"]
     sales["Date"] = pd.to_datetime(sales["date"], errors="coerce")
     sales["Time"] = sales["time"].astype(str).str[:5]
-    sales["Branch"] = sales["branch"] if "branch" in sales else "NexusBI"
-    sales["City"] = sales["branch"] if "branch" in sales else "NexusBI"
+    sales["Branch"] = sales["branch"] if "branch" in sales else "Lucciola"
+    sales["City"] = sales["branch"] if "branch" in sales else "Lucciola"
     sales["Customer_Type"] = sales["membership_tier"].map(lambda value: "Member" if value else "Normal") if "membership_tier" in sales else "Normal"
     sales["Gender"] = "Unknown"
     sales["Product_Line"] = sales["category"]
@@ -122,7 +122,7 @@ def main() -> int:
     """Run generation, validation, processing, analytics, and reporting."""
     config.ensure_directories()
     timing: dict[str, Any] = {}
-    logger.info("=== NexusBI full pipeline started ===")
+    logger.info("=== Lucciola full pipeline started ===")
 
     generated: Any = _run_stage("Generate data", lambda: _generate_data(), timing)
     sales_df = generated[0] if isinstance(generated, tuple) and len(generated) >= 1 else None
@@ -153,7 +153,7 @@ def main() -> int:
         print(f"{name:24s} {status:8s} {details['seconds']:8.2f}s{suffix}")
     print("-" * 72)
     print("Pipeline complete. Run: streamlit run dashboard/app.py")
-    logger.info("=== NexusBI full pipeline finished ===")
+    logger.info("=== Lucciola full pipeline finished ===")
     # Failures are visible in the summary, but partial outputs remain usable.
     return 0
 

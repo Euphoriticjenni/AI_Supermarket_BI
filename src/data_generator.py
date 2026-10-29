@@ -1,4 +1,4 @@
-"""Generate realistic, reproducible NexusBI supermarket datasets.
+"""Generate realistic, reproducible Lucciola supermarket datasets.
 
 The generator deliberately keeps the expensive sales work vectorised.  Faker
 is used only for customer names and email addresses; dates, quantities,
@@ -15,6 +15,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 from faker import Faker
+from sqlalchemy import create_engine
 
 from src import config
 from src.logger import get_logger
@@ -505,8 +506,104 @@ def generate_transactions(
     return sales
 
 
+def _to_legacy_sales(sales: pd.DataFrame) -> pd.DataFrame:
+    """Convert new-schema sales to legacy schema for SQLite database."""
+    legacy = sales.copy()
+    legacy["Invoice_ID"] = legacy["transaction_id"]
+    legacy["Date"] = pd.to_datetime(legacy["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    legacy["Time"] = legacy["time"].astype(str).str[:5]
+    legacy["Branch"] = legacy["branch"]
+    legacy["City"] = legacy["branch"]
+    legacy["Customer_Type"] = legacy["membership_tier"].map(
+        lambda v: "Member" if v and v != "Bronze" else "Normal"
+    )
+    legacy["Gender"] = "Unknown"
+    legacy["Product_Line"] = legacy["category"]
+    legacy["Unit_Price"] = pd.to_numeric(legacy["unit_price"], errors="coerce")
+    legacy["Quantity"] = pd.to_numeric(legacy["quantity"], errors="coerce")
+    legacy["Tax_5pct"] = (pd.to_numeric(legacy["unit_cost"], errors="coerce") * legacy["Quantity"] * 0.05).round(2)
+    legacy["Total"] = pd.to_numeric(legacy["total_amount"], errors="coerce")
+    legacy["Payment"] = legacy["payment_method"]
+    legacy["COGS"] = (pd.to_numeric(legacy["unit_cost"], errors="coerce") * legacy["Quantity"]).round(2)
+    legacy["Gross_Margin_Pct"] = np.where(legacy["Total"] != 0, legacy["profit"] / legacy["Total"] * 100, 0.0)
+    legacy["Gross_Income"] = pd.to_numeric(legacy["profit"], errors="coerce")
+    legacy["Rating"] = 7.5
+    cols = [
+        "Invoice_ID", "Date", "Time", "Branch", "City", "Customer_Type", "Gender",
+        "Product_Line", "Unit_Price", "Quantity", "Tax_5pct", "Total", "Payment",
+        "COGS", "Gross_Margin_Pct", "Gross_Income", "Rating",
+    ]
+    return legacy[cols]
+
+
+def _to_legacy_products(products: pd.DataFrame) -> pd.DataFrame:
+    """Convert new-schema products to legacy schema for SQLite database."""
+    legacy = products.rename(columns={
+        "product_id": "Product_ID",
+        "name": "Product_Name",
+        "category": "Category",
+        "supplier": "Supplier",
+        "unit_cost": "Cost",
+        "unit_price": "Selling_Price",
+    }).copy()
+    legacy["Stock"] = legacy.get("stock", 100)
+    legacy["Reorder_Level"] = legacy.get("reorder_level", 20)
+    return legacy[["Product_ID", "Product_Name", "Category", "Supplier", "Cost", "Selling_Price", "Stock", "Reorder_Level"]]
+
+
+def _to_legacy_customers(customers: pd.DataFrame) -> pd.DataFrame:
+    """Convert new-schema customers to legacy schema for SQLite database."""
+    legacy = customers.rename(columns={
+        "customer_id": "Customer_ID",
+        "preferred_branch": "City",
+        "membership_tier": "Membership",
+        "join_date": "Join_Date",
+    }).copy()
+    legacy["Gender"] = "Unknown"
+    age_map = {"18-24": 21, "25-34": 30, "35-44": 39, "45-54": 49, "55-64": 59, "65+": 70}
+    legacy["Age"] = legacy["age_group"].map(age_map).fillna(35).astype(int)
+    legacy["Total_Spent"] = 0.0
+    legacy["Visit_Count"] = (pd.to_numeric(legacy["avg_weekly_visits"], errors="coerce").fillna(0) * 52).round().astype(int)
+    return legacy[["Customer_ID", "Gender", "Age", "City", "Membership", "Join_Date", "Total_Spent", "Visit_Count"]]
+
+
+def load_to_database(sales: pd.DataFrame, products: pd.DataFrame, customers: pd.DataFrame) -> None:
+    """Load generated data into the SQLite database with legacy schema."""
+    config.ensure_directories()
+    db_path = config.DATABASE_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    engine = create_engine(f"sqlite:///{db_path.as_posix()}")
+    try:
+        with engine.begin() as conn:
+            # Create tables from schema.sql
+            schema_path = Path(__file__).resolve().parent.parent / "database" / "schema.sql"
+            if schema_path.exists():
+                schema_sql = schema_path.read_text()
+                for statement in schema_sql.split(";"):
+                    stmt = statement.strip()
+                    if stmt:
+                        conn.exec_driver_sql(stmt)
+
+            # Convert to legacy schema and load
+            legacy_sales = _to_legacy_sales(sales)
+            legacy_products = _to_legacy_products(products)
+            legacy_customers = _to_legacy_customers(customers)
+
+            legacy_sales.to_sql("sales", conn, if_exists="replace", index=False, chunksize=10000)
+            legacy_products.to_sql("products", conn, if_exists="replace", index=False)
+            legacy_customers.to_sql("customers", conn, if_exists="replace", index=False)
+
+            logger.info(
+                "Loaded database: {} sales, {} products, {} customers -> {}",
+                len(legacy_sales), len(legacy_products), len(legacy_customers), db_path,
+            )
+    finally:
+        engine.dispose()
+
+
 def generate_all(seed: int = 42, n_transactions: int = 750_000) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Generate and save products, customers, and sales CSVs."""
+    """Generate and save products, customers, and sales CSVs + SQLite database."""
     config.ensure_directories()
     products = generate_products(seed=seed)
     customers = generate_customers(seed=seed)
@@ -514,11 +611,13 @@ def generate_all(seed: int = 42, n_transactions: int = 750_000) -> tuple[pd.Data
     products.to_csv(config.PRODUCTS_DATA_FILE, index=False)
     customers.to_csv(config.CUSTOMERS_DATA_FILE, index=False)
     sales.to_csv(config.SALES_DATA_FILE, index=False)
+    load_to_database(sales, products, customers)
     print(f"Generated {len(products):,} products -> {config.PRODUCTS_DATA_FILE}")
     print(f"Generated {len(customers):,} customers -> {config.CUSTOMERS_DATA_FILE}")
     print(f"Generated {len(sales):,} transactions -> {config.SALES_DATA_FILE}")
     print(f"Revenue: ${sales['total_amount'].sum():,.2f} | Average line: ${sales['total_amount'].mean():,.2f}")
     print("Categories:", sales["category"].nunique(), "| Branches:", sales["branch"].nunique(), "| Payment methods:", sales["payment_method"].nunique())
+    print(f"Database: {config.DATABASE_PATH}")
     return sales, products, customers
 
 

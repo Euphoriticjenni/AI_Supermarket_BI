@@ -1,4 +1,4 @@
-"""Print a diagnostic report for the NexusBI augmented datasets.
+"""Print a diagnostic report for the Lucciola augmented datasets.
 
 Run from the project root with::
 
@@ -121,7 +121,7 @@ def audit_data() -> int:
     sales = pd.read_csv(sales_path)
     products = pd.read_csv(products_path) if products_path.exists() else pd.DataFrame()
     customers = pd.read_csv(customers_path, keep_default_na=False) if customers_path.exists() else pd.DataFrame()
-    _print_header("NexusBI DATA AUDIT")
+    _print_header("Lucciola DATA AUDIT")
     print(f"Project root: {ROOT}")
     print(f"Sales file:   {sales_path} ({sales_path.stat().st_size / 1024 ** 2:.1f} MB)")
     print(f"Rows:         {len(sales):,}")

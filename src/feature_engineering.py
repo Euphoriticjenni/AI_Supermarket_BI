@@ -15,6 +15,8 @@ Enriches the processed sales data with model-ready features:
 
 Public entry point: :func:`run_feature_engineering`.
 """
+from __future__ import annotations
+
 from typing import Optional
 
 import numpy as np
@@ -34,14 +36,55 @@ _HOLIDAY_MONTH_DAY = {
 
 
 # ---------------------------------------------------------------------------
+# Column resolution (supports both legacy and new schemas)
+# ---------------------------------------------------------------------------
+def _resolve_column(frame: pd.DataFrame, requested: str, aliases: tuple[str, ...]) -> Optional[str]:
+    """Resolve a requested column against common legacy and new aliases."""
+    if requested in frame.columns:
+        return requested
+    lower = {str(column).lower(): str(column) for column in frame.columns}
+    for candidate in (requested, *aliases):
+        if candidate.lower() in lower:
+            return lower[candidate.lower()]
+    return None
+
+
+def _resolve_columns(df: pd.DataFrame) -> dict[str, str]:
+    """Map canonical internal names to actual DataFrame columns."""
+    return {
+        "date": _resolve_column(df, "Date", ("date", "datetime", "ds")),
+        "time": _resolve_column(df, "Time", ("time",)),
+        "total": _resolve_column(df, "Total", ("total_amount", "Total", "revenue", "Revenue", "y")),
+        "cogs": _resolve_column(df, "COGS", ("unit_cost", "COGS", "cost")),
+        "tax": _resolve_column(df, "Tax_5pct", ("tax", "Tax_5pct")),
+        "invoice_id": _resolve_column(df, "Invoice_ID", ("transaction_id", "Invoice_ID", "invoice_id")),
+        "product_line": _resolve_column(df, "Product_Line", ("category", "Product_Line", "product_line")),
+        "quantity": _resolve_column(df, "Quantity", ("quantity", "Quantity")),
+        "unit_price": _resolve_column(df, "Unit_Price", ("unit_price", "Unit_Price", "Selling_Price")),
+        "unit_cost": _resolve_column(df, "Cost", ("unit_cost", "Cost", "unit_cost")),
+        "gross_income": _resolve_column(df, "Gross_Income", ("profit", "Gross_Income", "profit")),
+        "gross_margin_pct": _resolve_column(df, "Gross_Margin_Pct", ("margin", "Gross_Margin_Pct")),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Feature builders (each takes and returns a DataFrame)
 # ---------------------------------------------------------------------------
 def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
     """Add calendar features derived from ``Date`` and ``Time``."""
     try:
-        dates = df["Date"]
-        if "Time" in df.columns:
-            df["Purchase_Hour"] = pd.to_datetime(df["Time"], format="%H:%M").dt.hour.astype("int8")
+        cols = _resolve_columns(df)
+        date_col = cols["date"]
+        time_col = cols["time"]
+        if date_col is None:
+            logger.warning("No date column found; skipping temporal features.")
+            return df
+
+        dates = pd.to_datetime(df[date_col], errors="coerce")
+        if time_col and time_col in df.columns:
+            # Support both "HH:MM" and "HH:MM:SS" time strings
+            parsed_time = pd.to_datetime(df[time_col].astype(str), errors="coerce")
+            df["Purchase_Hour"] = parsed_time.dt.hour.fillna(0).astype("int8")
         df["Day_of_Week"] = dates.dt.dayofweek.astype("int8")
         df["Day_Name"] = dates.dt.day_name()
         df["Month"] = dates.dt.month.astype("int8")
@@ -66,13 +109,42 @@ def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
 def add_financial_features(df: pd.DataFrame) -> pd.DataFrame:
     """Add Profit, Profit_Margin and the effective Tax_Rate (percent)."""
     try:
-        df["Profit"] = (df["Total"] - df["COGS"]).round(2)
-        df["Profit_Margin"] = np.where(
-            df["Total"] > 0, df["Profit"] / df["Total"] * 100, 0.0
-        ).round(4)
-        df["Tax_Rate"] = np.where(
-            df["COGS"] > 0, df["Tax_5pct"] / df["COGS"] * 100, 0.0
-        ).round(4)
+        cols = _resolve_columns(df)
+        total_col = cols["total"]
+        cogs_col = cols["cogs"]
+        tax_col = cols["tax"]
+        gross_income_col = cols["gross_income"]
+        gross_margin_col = cols["gross_margin_pct"]
+
+        # Profit: prefer existing profit/gross_income, else compute from Total - COGS
+        if gross_income_col and gross_income_col in df.columns:
+            df["Profit"] = pd.to_numeric(df[gross_income_col], errors="coerce").round(2)
+        elif total_col and cogs_col and total_col in df.columns and cogs_col in df.columns:
+            df["Profit"] = (pd.to_numeric(df[total_col], errors="coerce") - pd.to_numeric(df[cogs_col], errors="coerce")).round(2)
+        else:
+            df["Profit"] = 0.0
+
+        # Profit_Margin
+        if gross_margin_col and gross_margin_col in df.columns:
+            df["Profit_Margin"] = pd.to_numeric(df[gross_margin_col], errors="coerce").round(4)
+        elif total_col and total_col in df.columns:
+            total_vals = pd.to_numeric(df[total_col], errors="coerce")
+            df["Profit_Margin"] = np.where(
+                total_vals > 0, df["Profit"] / total_vals * 100, 0.0
+            ).round(4)
+        else:
+            df["Profit_Margin"] = 0.0
+
+        # Tax_Rate
+        if tax_col and tax_col in df.columns and cogs_col and cogs_col in df.columns:
+            cogs_vals = pd.to_numeric(df[cogs_col], errors="coerce")
+            tax_vals = pd.to_numeric(df[tax_col], errors="coerce")
+            df["Tax_Rate"] = np.where(
+                cogs_vals > 0, tax_vals / cogs_vals * 100, 0.0
+            ).round(4)
+        else:
+            df["Tax_Rate"] = 0.0
+
         logger.info(
             "Financial features added (profit ${:,.2f}, mean margin {:.2f}%, mean tax {:.2f}%).",
             df["Profit"].sum(), df["Profit_Margin"].mean(), df["Tax_Rate"].mean(),
@@ -84,29 +156,30 @@ def add_financial_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def add_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add per-product-line 7-day and 30-day rolling means of daily sales.
-
-    Mirrors :func:`add_lag_features`: daily ``Total`` revenue is aggregated
-    per product line on a complete daily grid, a time-based rolling mean is
-    computed, and the result is mapped back onto every transaction of that
-    date and line (so a row's value = mean daily revenue for its line over
-    the trailing window). Residual NaNs are forward-filled then zero-filled.
-    """
+    """Add per-product-line 7-day and 30-day rolling means of daily sales."""
     try:
-        df = df.sort_values("Date").reset_index(drop=True)
-        pivot = _daily_per_product_line(df)
+        cols = _resolve_columns(df)
+        date_col = cols["date"]
+        total_col = cols["total"]
+        product_line_col = cols["product_line"]
 
-        stacked = [pivot.rolling(window=w, min_periods=1).mean().stack(dropna=False)
-                   .rename(c) for c, w in
-                   (("Rolling_7d_Sales", "7D"), ("Rolling_30d_Sales", "30D"))]
+        if not all([date_col, total_col, product_line_col]):
+            logger.warning("Missing columns for rolling features; skipping.")
+            return df
+
+        df = df.sort_values(date_col).reset_index(drop=True)
+        pivot = _daily_per_product_line(df, date_col, total_col, product_line_col)
+
+        stacked = [
+            pivot.rolling(window=w, min_periods=1).mean().stack(dropna=False).rename(c)
+            for c, w in (("Rolling_7d_Sales", "7D"), ("Rolling_30d_Sales", "30D"))
+        ]
         rolled = pd.concat(stacked, axis=1).reset_index()
-        rolled = rolled.rename(columns={rolled.columns[0]: "_r_date",
-                                        rolled.columns[1]: "_r_line"})
+        rolled = rolled.rename(columns={rolled.columns[0]: "_r_date", rolled.columns[1]: "_r_line"})
         rolled["_r_line"] = rolled["_r_line"].astype(str)
 
-        df = df.assign(_date=df["Date"].dt.normalize(), _line=df["Product_Line"].astype(str))
-        df = df.merge(rolled, how="left", left_on=["_date", "_line"],
-                      right_on=["_r_date", "_r_line"])
+        df = df.assign(_date=pd.to_datetime(df[date_col]).dt.normalize(), _line=df[product_line_col].astype(str))
+        df = df.merge(rolled, how="left", left_on=["_date", "_line"], right_on=["_r_date", "_r_line"])
         df = df.drop(columns=["_date", "_line", "_r_date", "_r_line"], errors="ignore")
 
         for column in ("Rolling_7d_Sales", "Rolling_30d_Sales"):
@@ -121,38 +194,44 @@ def add_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
         raise
 
 
-def _daily_per_product_line(df: pd.DataFrame) -> pd.DataFrame:
+def _daily_per_product_line(
+    df: pd.DataFrame, date_col: str, total_col: str, product_line_col: str
+) -> pd.DataFrame:
     """Return a complete date x product-line grid of daily Total sales."""
     daily = (
-        df.groupby([df["Date"].dt.normalize().rename("Date"), "Product_Line"], observed=True)["Total"]
+        df.groupby(
+            [pd.to_datetime(df[date_col]).dt.normalize().rename("Date"), product_line_col],
+            observed=True,
+        )[total_col]
         .sum()
         .reset_index()
     )
     full_dates = pd.date_range(daily["Date"].min(), daily["Date"].max(), freq="D")
-    pivot = daily.pivot(index="Date", columns="Product_Line", values="Total").reindex(full_dates)
+    pivot = daily.pivot(index="Date", columns=product_line_col, values=total_col).reindex(full_dates)
     return pivot
 
 
 def add_lag_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add per-product-line daily sales lagged by 1, 7 and 30 days.
-
-    The daily totals are computed on a complete daily grid per product line
-    (calendar gaps become NaN days) so ``shift(k)`` always means "k
-    calendar days ago".
-    """
+    """Add per-product-line daily sales lagged by 1, 7 and 30 days."""
     try:
-        pivot = _daily_per_product_line(df)
+        cols = _resolve_columns(df)
+        date_col = cols["date"]
+        total_col = cols["total"]
+        product_line_col = cols["product_line"]
+
+        if not all([date_col, total_col, product_line_col]):
+            logger.warning("Missing columns for lag features; skipping.")
+            return df
+
+        pivot = _daily_per_product_line(df, date_col, total_col, product_line_col)
         lags = pd.concat(
             [pivot.shift(k).stack(dropna=False).rename(f"Sales_Lag_{k}") for k in (1, 7, 30)],
             axis=1,
         ).reset_index()
-        # The grid reindex leaves the date level unnamed; rename by position
-        # so the merge keys are always well-defined.
-        lags = lags.rename(columns={lags.columns[0]: "_lag_date"})
-        lags = lags.rename(columns={lags.columns[1]: "_lag_line"})
+        lags = lags.rename(columns={lags.columns[0]: "_lag_date", lags.columns[1]: "_lag_line"})
         lags["_lag_line"] = lags["_lag_line"].astype(str)
 
-        df = df.assign(_date=df["Date"].dt.normalize(), _line=df["Product_Line"].astype(str))
+        df = df.assign(_date=pd.to_datetime(df[date_col]).dt.normalize(), _line=df[product_line_col].astype(str))
         df = df.merge(
             lags,
             how="left",
@@ -181,13 +260,25 @@ def add_basket_features(df: pd.DataFrame) -> pd.DataFrame:
       explicit so multi-line invoice data would work unchanged.
     """
     try:
-        df["Items_Per_Transaction"] = df["Quantity"].astype("int64")
-        invoice_means = df.groupby("Invoice_ID", observed=True)["Total"].mean()
-        df["Avg_Basket_Value"] = df["Invoice_ID"].map(invoice_means).round(2)
-        logger.info(
-            "Basket features added (mean basket value ${:,.2f} across {:,} invoices).",
-            invoice_means.mean(), len(invoice_means),
-        )
+        cols = _resolve_columns(df)
+        quantity_col = cols["quantity"]
+        total_col = cols["total"]
+        invoice_id_col = cols["invoice_id"]
+
+        if quantity_col and quantity_col in df.columns:
+            df["Items_Per_Transaction"] = pd.to_numeric(df[quantity_col], errors="coerce").astype("int64")
+        else:
+            df["Items_Per_Transaction"] = 1
+
+        if invoice_id_col and total_col and invoice_id_col in df.columns and total_col in df.columns:
+            invoice_means = df.groupby(invoice_id_col, observed=True)[total_col].mean()
+            df["Avg_Basket_Value"] = df[invoice_id_col].map(invoice_means).round(2)
+            logger.info(
+                "Basket features added (mean basket value ${:,.2f} across {:,} invoices).",
+                invoice_means.mean(), len(invoice_means),
+            )
+        else:
+            df["Avg_Basket_Value"] = 0.0
         return df
     except Exception:
         logger.exception("add_basket_features failed")

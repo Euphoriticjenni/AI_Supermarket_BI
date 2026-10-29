@@ -14,8 +14,10 @@ All plotly figures are returned as objects only (rendered by Streamlit);
 static PNG export is deliberately NOT done here — kaleido is broken on
 this host, and the PDF report uses matplotlib instead.
 """
+from __future__ import annotations
+
 import zlib
-from typing import Dict
+from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -33,6 +35,44 @@ PALETTE = px.colors.qualitative.Set2
 PALETTE_HEX = ["#66c2a5", "#fc8d62", "#8da0cb", "#e78ac3", "#a6d854", "#ffd92f"]
 
 _TEMPLATE = dict(template=config.PLOTLY_TEMPLATE, height=config.CHART_HEIGHT)
+
+
+# ---------------------------------------------------------------------------
+# Column resolution (supports both legacy and new schemas)
+# ---------------------------------------------------------------------------
+def _resolve_column(frame: pd.DataFrame, requested: str, aliases: tuple[str, ...]) -> Optional[str]:
+    """Resolve a requested column against common legacy and new aliases."""
+    if requested in frame.columns:
+        return requested
+    lower = {str(column).lower(): str(column) for column in frame.columns}
+    for candidate in (requested, *aliases):
+        if candidate.lower() in lower:
+            return lower[candidate.lower()]
+    return None
+
+
+def _resolve_columns(df: pd.DataFrame) -> dict[str, str]:
+    """Map canonical internal names to actual DataFrame columns."""
+    return {
+        "date": _resolve_column(df, "Date", ("date", "datetime", "ds")),
+        "time": _resolve_column(df, "Time", ("time",)),
+        "total": _resolve_column(df, "Total", ("total_amount", "Total", "revenue", "Revenue", "y")),
+        "cogs": _resolve_column(df, "COGS", ("unit_cost", "COGS", "cost")),
+        "tax": _resolve_column(df, "Tax_5pct", ("tax", "Tax_5pct")),
+        "invoice_id": _resolve_column(df, "Invoice_ID", ("transaction_id", "Invoice_ID", "invoice_id")),
+        "product_line": _resolve_column(df, "Product_Line", ("category", "Product_Line", "product_line")),
+        "quantity": _resolve_column(df, "Quantity", ("quantity", "Quantity")),
+        "unit_price": _resolve_column(df, "Unit_Price", ("unit_price", "Unit_Price", "Selling_Price")),
+        "unit_cost": _resolve_column(df, "Cost", ("unit_cost", "Cost", "unit_cost")),
+        "gross_income": _resolve_column(df, "Gross_Income", ("profit", "Gross_Income", "profit")),
+        "gross_margin_pct": _resolve_column(df, "Gross_Margin_Pct", ("margin", "Gross_Margin_Pct")),
+        "branch": _resolve_column(df, "Branch", ("branch", "Branch")),
+        "city": _resolve_column(df, "City", ("city", "City")),
+        "customer_type": _resolve_column(df, "Customer_Type", ("membership_tier", "Customer_Type", "customer_type")),
+        "gender": _resolve_column(df, "Gender", ("gender", "Gender")),
+        "payment": _resolve_column(df, "Payment", ("payment_method", "Payment", "payment_method")),
+        "rating": _resolve_column(df, "Rating", ("rating", "Rating")),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -102,19 +142,32 @@ def rfm_analysis(sales_df: pd.DataFrame) -> pd.DataFrame:
         F_Score, M_Score, RFM_Segment, CLV, CLV_Tier.
     """
     logger.info("RFM analysis started for {:,} sales rows ...", len(sales_df))
+    cols = _resolve_columns(sales_df)
     df = sales_df.copy()
-    df["Date"] = pd.to_datetime(df["Date"])
+
+    date_col = cols["date"]
+    invoice_id_col = cols["invoice_id"]
+    total_col = cols["total"]
+
+    if not date_col or not invoice_id_col or not total_col:
+        logger.warning("Missing required columns for RFM; returning empty result.")
+        return pd.DataFrame(columns=[
+            "Customer_ID", "Recency", "Frequency", "Monetary",
+            "R_Score", "F_Score", "M_Score", "RFM_Segment", "CLV", "CLV_Tier",
+        ])
+
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
 
     # Deterministic customer proxy from the invoice ID.
-    df["Customer_ID"] = "CUST-" + df["Invoice_ID"].map(
+    df["Customer_ID"] = "CUST-" + df[invoice_id_col].map(
         lambda inv: f"{zlib.crc32(str(inv).encode('utf-8')) % 10000:05d}"
     )
 
-    snapshot = df["Date"].max()
+    snapshot = df[date_col].max()
     grouped = df.groupby("Customer_ID", observed=True).agg(
-        Last_Purchase=("Date", "max"),
-        Frequency=("Invoice_ID", "nunique"),
-        Monetary=("Total", "sum"),
+        Last_Purchase=(date_col, "max"),
+        Frequency=(invoice_id_col, "nunique"),
+        Monetary=(total_col, "sum"),
     ).reset_index()
     grouped["Recency"] = (snapshot - grouped["Last_Purchase"]).dt.days
     grouped = grouped[["Customer_ID", "Recency", "Frequency", "Monetary"]]
@@ -177,29 +230,65 @@ def product_analysis(sales_df: pd.DataFrame) -> Dict:
         and ``charts`` (dict of plotly figures).
     """
     logger.info("Product analysis started ...")
+    cols = _resolve_columns(sales_df)
     df = sales_df.copy()
-    df["Date"] = pd.to_datetime(df["Date"])
-    df["Month_Num"] = df["Date"].dt.month
 
-    line_stats = df.groupby("Product_Line", observed=True).agg(
-        Revenue=("Total", "sum"),
-        Orders=("Invoice_ID", "nunique"),
+    date_col = cols["date"]
+    total_col = cols["total"]
+    invoice_id_col = cols["invoice_id"]
+    product_line_col = cols["product_line"]
+    gross_income_col = cols["gross_income"]
+
+    if not all([date_col, total_col, invoice_id_col, product_line_col]):
+        logger.warning("Missing required columns for product analysis; returning empty result.")
+        empty_df = pd.DataFrame()
+        return {
+            "best_sellers": empty_df,
+            "slow_movers": empty_df,
+            "profitability": empty_df,
+            "seasonal": empty_df,
+            "abc": empty_df,
+            "charts": {},
+        }
+
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+    df["Month_Num"] = df[date_col].dt.month
+
+    line_stats = df.groupby(product_line_col, observed=True).agg(
+        Revenue=(total_col, "sum"),
+        Orders=(invoice_id_col, "nunique"),
     ).reset_index()
+    # Normalize output column to "Product_Line" for downstream consumers
+    line_stats = line_stats.rename(columns={product_line_col: "Product_Line"})
     line_stats["Avg_Order"] = (line_stats["Revenue"] / line_stats["Orders"]).round(2)
 
     best_sellers = line_stats.sort_values("Revenue", ascending=False).head(10).reset_index(drop=True)
     slow_movers = line_stats.sort_values("Revenue").head(5).reset_index(drop=True)
 
+    # Profitability: use gross_income if available, else estimate from total * margin
+    if gross_income_col and gross_income_col in df.columns:
+        profit_col = gross_income_col
+    else:
+        # Estimate profit as a fraction of total (using Gross_Margin_Pct default ~4.76%)
+        margin_col = cols["gross_margin_pct"]
+        if margin_col and margin_col in df.columns:
+            df["_profit_est"] = pd.to_numeric(df[total_col], errors="coerce") * pd.to_numeric(df[margin_col], errors="coerce") / 100
+            profit_col = "_profit_est"
+        else:
+            df["_profit_est"] = pd.to_numeric(df[total_col], errors="coerce") * 0.0476
+            profit_col = "_profit_est"
+
     profitability = (
-        df.groupby("Product_Line", observed=True)
-        .agg(Revenue=("Total", "sum"), Profit=("Gross_Income", "sum"))
+        df.groupby(product_line_col, observed=True)
+        .agg(Revenue=(total_col, "sum"), Profit=(profit_col, "sum"))
         .reset_index()
     )
+    profitability = profitability.rename(columns={product_line_col: "Product_Line"})
     profitability["Margin_Pct"] = (profitability["Profit"] / profitability["Revenue"] * 100).round(2)
     profitability = profitability.sort_values("Revenue", ascending=False).reset_index(drop=True)
 
     seasonal = df.pivot_table(
-        index="Month_Num", columns="Product_Line", values="Total",
+        index="Month_Num", columns=product_line_col, values=total_col,
         aggfunc="sum", observed=True,
     ).fillna(0.0)
     seasonal.index.name = "Month"
@@ -294,23 +383,43 @@ def trend_analysis(sales_df: pd.DataFrame) -> Dict:
         projected_total / lower / upper / method) and ``charts``.
     """
     logger.info("Trend analysis started ...")
+    cols = _resolve_columns(sales_df)
     df = sales_df.copy()
-    df["Date"] = pd.to_datetime(df["Date"])
 
-    daily = df.groupby(df["Date"].dt.normalize())["Total"].sum().sort_index()
+    date_col = cols["date"]
+    total_col = cols["total"]
+
+    if not date_col or not total_col:
+        logger.warning("Missing required columns for trend analysis; returning empty result.")
+        empty_df = pd.DataFrame()
+        return {
+            "daily_trend": empty_df,
+            "weekly_trend": empty_df,
+            "monthly_trend": empty_df,
+            "yoy_comparison": empty_df,
+            "moving_averages": empty_df,
+            "growth_rates": empty_df,
+            "projection": {"projected_total": 0, "lower": 0, "upper": 0, "method": "N/A", "horizon_days": 30, "seasonal_factor": 1.0, "upcoming_month": 1},
+            "charts": {},
+        }
+
+    df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
+
+    daily = df.groupby(df[date_col].dt.normalize())[total_col].sum().sort_index()
     daily_trend = daily.reset_index()
+    daily_trend.columns = ["Date", "Total"]
 
-    iso = df["Date"].dt.isocalendar()
-    weekly = df.groupby([iso["year"].astype(int), iso["week"].astype(int)])["Total"].sum()
+    iso = df[date_col].dt.isocalendar()
+    weekly = df.groupby([iso["year"].astype(int), iso["week"].astype(int)])[total_col].sum()
     weekly_trend = weekly.reset_index()
     weekly_trend.columns = ["ISO_Year", "ISO_Week", "Total"]
     weekly_trend["Week"] = weekly_trend["ISO_Year"].astype(str) + "-W" + weekly_trend["ISO_Week"].astype(str).str.zfill(2)
     weekly_trend = weekly_trend[["Week", "Total"]]
 
     monthly_frame = pd.DataFrame({
-        "Year": df["Date"].dt.year.astype(int),
-        "Month": df["Date"].dt.month.astype(int),
-        "Total": df["Total"],
+        "Year": df[date_col].dt.year.astype(int),
+        "Month": df[date_col].dt.month.astype(int),
+        "Total": pd.to_numeric(df[total_col], errors="coerce"),
     })
     monthly = monthly_frame.groupby(["Year", "Month"])["Total"].sum().sort_index()
     monthly_trend = monthly.reset_index()
@@ -332,7 +441,7 @@ def trend_analysis(sales_df: pd.DataFrame) -> Dict:
     growth_rates = growth[["Year_Month", "Total", "MoM_Pct", "YoY_Pct"]]
 
     # ---- simple seasonal-adjusted projection ----------------------------
-    projection = _simple_projection(daily, df)
+    projection = _simple_projection(daily, df, date_col, total_col)
 
     # ---- charts ---------------------------------------------------------
     charts: Dict = {}
@@ -359,8 +468,8 @@ def trend_analysis(sales_df: pd.DataFrame) -> Dict:
     charts["monthly_yoy_chart"] = monthly_yoy_chart
 
     monthly_pivot = df.pivot_table(
-        index=df["Date"].dt.month, columns=df["Date"].dt.year,
-        values="Total", aggfunc="sum",
+        index=df[date_col].dt.month, columns=df[date_col].dt.year,
+        values=total_col, aggfunc="sum",
     ).fillna(0.0)
     monthly_pivot.columns = [str(c) for c in monthly_pivot.columns]
     seasonal_heatmap = px.imshow(
@@ -388,7 +497,7 @@ def trend_analysis(sales_df: pd.DataFrame) -> Dict:
     }
 
 
-def _simple_projection(daily: pd.Series, df: pd.DataFrame) -> Dict:
+def _simple_projection(daily: pd.Series, df: pd.DataFrame, date_col: str, total_col: str) -> Dict:
     """Seasonal-adjusted moving-average projection for the next 30 days.
 
     Method
@@ -411,7 +520,6 @@ def _simple_projection(daily: pd.Series, df: pd.DataFrame) -> Dict:
     reference_year = last_date.year if last_date.month < 12 else last_date.year  # last full year
 
     year_daily = daily[daily.index.year == reference_year]
-    month_keys = daily.index.month
     overall_avg = float(year_daily.mean()) if len(year_daily) else daily_avg_30 or 1.0
     month_avg = float(year_daily[year_daily.index.month == upcoming_month].mean()) if len(year_daily) else daily_avg_30
     seasonal_factor = month_avg / overall_avg if overall_avg else 1.0
@@ -453,6 +561,10 @@ def run_full_analytics(sales_df: pd.DataFrame) -> Dict:
         product = product_analysis(sales_df)
         trend = trend_analysis(sales_df)
 
+        cols = _resolve_columns(sales_df)
+        total_col = cols["total"]
+        total_revenue = float(sales_df[total_col].sum()) if total_col and total_col in sales_df.columns else 0.0
+
         kpis = pd.DataFrame({
             "Section": "KPI",
             "Label": [
@@ -461,8 +573,8 @@ def run_full_analytics(sales_df: pd.DataFrame) -> Dict:
             ],
             "Value": [
                 f"{len(rfm):,}",
-                f"{float(sales_df['Total'].sum()):,.2f}",
-                product["best_sellers"].iloc[0]["Product_Line"],
+                f"{total_revenue:,.2f}",
+                product["best_sellers"].iloc[0]["Product_Line"] if not product["best_sellers"].empty else "N/A",
                 f"{trend['projection']['projected_total']:,.2f}",
                 f"{trend['projection']['lower']:,.2f}",
                 f"{trend['projection']['upper']:,.2f}",
