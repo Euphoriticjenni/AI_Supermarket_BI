@@ -57,12 +57,17 @@ h1, h2, h3 {{ color: {TEXT_PRIMARY}; font-weight: 600; letter-spacing: -0.025em;
 .nx-page-intro {{ margin-bottom:24px; }}
 .nx-page-intro h1 {{ margin:0; font-size:1.65rem; }}
 .nx-page-intro p {{ color:{TEXT_SECONDARY}; margin:6px 0 0; font-size:.9rem; }}
-.nx-kpi {{ background:{BG_SURFACE}; border:1px solid {BORDER}; border-radius:8px; padding:16px 18px; box-shadow:0 1px 2px rgba(0,0,0,.3); min-height:126px; }}
-.nx-kpi-label {{ color:{TEXT_MUTED}; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; font-weight:500; }}
-.nx-kpi .stMetric {{ padding:0; }}
-.nx-kpi [data-testid="stMetricValue"] {{ color:{TEXT_PRIMARY}; font-size:1.75rem; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.03em; }}
-.nx-kpi [data-testid="stMetricDelta"] {{ font-size:.75rem; }}
-.nx-kpi svg {{ display:none; }}
+.nx-kpi {{ background:{BG_SURFACE}; border:1px solid {BORDER}; border-radius:8px; padding:16px 18px; box-shadow:0 1px 2px rgba(0,0,0,.3); min-height:132px; display:flex; flex-direction:column; justify-content:space-between; gap:4px; }}
+.nx-kpi-label {{ color:{TEXT_MUTED}; font-size:.68rem; text-transform:uppercase; letter-spacing:.06em; font-weight:600; }}
+.nx-kpi-value {{ color:{TEXT_PRIMARY}; font-size:1.65rem; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.03em; line-height:1.15; margin:4px 0 2px; }}
+.nx-kpi .stMetric {{ padding:0; margin:0; }}
+.nx-kpi [data-testid="stMetric"] {{ gap:0; }}
+.nx-kpi [data-testid="stMetricValue"] {{ color:{TEXT_PRIMARY}; font-size:1.60rem; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.03em; line-height:1.1; }}
+.nx-kpi [data-testid="stMetricLabel"] {{ color:{TEXT_MUTED}; font-size:.68rem; letter-spacing:.05em; }}
+.nx-kpi [data-testid="stMetricDelta"] {{ font-size:.72rem; margin-top:2px; }}
+.nx-kpi svg.nx-spark {{ display:block; margin-top:8px; width:100%; opacity:.85; }}
+.nx-kpi-row {{ display:flex; gap:16px; }}
+.nx-kpi-row > div {{ flex:1; }}
 .nx-section {{ color:{TEXT_PRIMARY}; font-size:1rem; font-weight:600; letter-spacing:-.015em; margin:26px 0 10px; }}
 .nx-section-sub {{ color:{TEXT_SECONDARY}; font-size:.8rem; margin:-5px 0 12px; }}
 .nx-panel {{ background:{BG_SURFACE}; border:1px solid {BORDER}; border-radius:8px; padding:20px; box-shadow:0 1px 2px rgba(0,0,0,.3); }}
@@ -166,13 +171,15 @@ def apply_chart_theme(fig: Any) -> Any:
         template="plotly_dark",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family=FONT, color=TEXT_SECONDARY),
+        font=dict(family=FONT, color=TEXT_SECONDARY, size=11),
         colorway=COLORWAY,
-        margin=dict(l=12, r=12, t=36, b=12),
-        hoverlabel=dict(bgcolor=BG_ELEVATED, bordercolor=BORDER, font=dict(color=TEXT_PRIMARY, family=FONT)),
+        margin=dict(l=12, r=12, t=36, b=16),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, font=dict(size=11, color=TEXT_SECONDARY)),
+        hovermode="x unified",
+        hoverlabel=dict(bgcolor=BG_ELEVATED, bordercolor=BORDER, font=dict(color=TEXT_PRIMARY, family=FONT, size=11)),
     )
-    fig.update_xaxes(gridcolor=BORDER, zerolinecolor=BORDER, linecolor=BORDER, tickfont=dict(color=TEXT_MUTED))
-    fig.update_yaxes(gridcolor=BORDER, zerolinecolor=BORDER, linecolor=BORDER, tickfont=dict(color=TEXT_MUTED))
+    fig.update_xaxes(gridcolor="rgba(39,39,42,0.55)", zeroline=False, linecolor=BORDER, tickfont=dict(color=TEXT_MUTED, size=10), showgrid=True, nticks=8, tickangle=0)
+    fig.update_yaxes(gridcolor="rgba(39,39,42,0.5)", zeroline=False, linecolor=BORDER, tickfont=dict(color=TEXT_MUTED, size=10), showgrid=True)
     return fig
 
 
@@ -205,17 +212,20 @@ def format_percent(value: Any) -> str:
     return f"{float(value):.1f}%"
 
 
-def sparkline_svg(values: Sequence[float], color: str = ACCENT, width: int = 220, height: int = 28) -> str:
+def sparkline_svg(values: Sequence[float], color: str = ACCENT, width: int = 220, height: int = 32) -> str:
     clean = [float(v) for v in values if v is not None and not pd.isna(v)]
     if len(clean) < 2:
         return ""
     lo, hi = min(clean), max(clean)
     span = hi - lo or 1.0
+    # smooth with simple 3-pt average for visual clarity when many points
+    if len(clean) > 14:
+        clean = [clean[0]] + [(clean[i-1]+clean[i]+clean[i+1])/3 for i in range(1, len(clean)-1)] + [clean[-1]]
     points = " ".join(
-        f"{i * width / (len(clean) - 1):.1f},{height - 2 - (v - lo) / span * (height - 4):.1f}"
+        f"{i * width / (len(clean) - 1):.1f},{height - 3 - (v - lo) / span * (height - 6):.1f}"
         for i, v in enumerate(clean)
     )
-    return f'<svg class="nx-spark" viewBox="0 0 {width} {height}" width="100%" height="{height}"><polyline points="{points}" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round"/></svg>'
+    return f'<svg class="nx-spark" viewBox="0 0 {width} {height}" width="100%" height="{height}" preserveAspectRatio="none"><polyline points="{points}" fill="none" stroke="{color}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/></svg>'
 
 
 def _find(frame: pd.DataFrame, *names: str) -> Optional[str]:
