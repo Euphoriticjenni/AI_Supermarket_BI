@@ -71,7 +71,7 @@ def answer_question(question: str) -> None:
     st.session_state.nexus_last_result = data
 
 
-left, right = st.columns([7, 3])
+left, right = st.columns([7, 3], gap="large")
 with left:
     st.markdown('<div class="nx-section">Conversation</div>', unsafe_allow_html=True)
     for message in st.session_state.nexus_chat[-12:]:
@@ -81,8 +81,8 @@ with left:
             f'<div style="background:{color};color:{theme.TEXT_PRIMARY};border:1px solid {theme.BORDER};border-radius:8px;padding:12px 14px;margin:8px 0;text-align:{align}"><strong>{"You" if message["role"] == "user" else "Lucciola"}</strong><br>{message["text"]}</div>',
             unsafe_allow_html=True,
         )
-    st.markdown("Suggested questions", unsafe_allow_html=True)
-    chips = st.columns(4)
+    st.markdown('<div style="margin-top:12px;color:#A1A1AA;font-size:.78rem">Suggested questions</div>', unsafe_allow_html=True)
+    chips = st.columns(4, gap="small")
     for col, suggestion in zip(chips, suggestions):
         with col:
             if st.button(suggestion, key=f"suggestion_{suggestion}", use_container_width=True):
@@ -99,14 +99,30 @@ with left:
 with right:
     st.markdown('<div class="nx-section">Insights</div>', unsafe_allow_html=True)
     revenue = float(df["total_amount"].sum()) if not df.empty else 0
-    st.metric("Revenue in context", theme.format_currency(revenue))
-    st.metric("Active rows", theme.format_number(len(df)))
+    k1, k2 = st.columns(2, gap="small")
+    with k1:
+        st.markdown(f'<div class="nx-kpi" style="min-height:96px"><div class="nx-kpi-label">Revenue in context</div><div class="nx-kpi-value" style="font-size:1.25rem">{theme.format_currency(revenue)}</div></div>', unsafe_allow_html=True)
+    with k2:
+        st.markdown(f'<div class="nx-kpi" style="min-height:96px"><div class="nx-kpi-label">Active rows</div><div class="nx-kpi-value" style="font-size:1.25rem">{theme.format_number(len(df))}</div></div>', unsafe_allow_html=True)
+
+    # Revenue context — decluttered: weekly when >90 days + faint area, no spiky daily
     daily = df.groupby("date", as_index=False)["total_amount"].sum() if not df.empty else pd.DataFrame(columns=["date", "total_amount"])
-    fig = go.Figure(go.Scatter(x=daily["date"], y=daily["total_amount"], mode="lines", line=dict(color=theme.ACCENT), name="Revenue"))
-    fig.update_layout(title="Revenue context")
-    theme.apply_chart_theme(fig)
-    fig.update_layout(height=250)
-    st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+    if not daily.empty:
+        if len(daily) > 90:
+            daily["wk"] = daily["date"].dt.to_period("W").dt.start_time
+            plot_daily = daily.groupby("wk", as_index=False)["total_amount"].sum().rename(columns={"wk": "date"})
+            title_suffix = " · weekly"
+        else:
+            plot_daily = daily
+            title_suffix = ""
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=plot_daily["date"], y=plot_daily["total_amount"], line=dict(width=0), fill="tozeroy", fillcolor="rgba(59,130,246,0.05)", showlegend=False, hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=plot_daily["date"], y=plot_daily["total_amount"], mode="lines", line=dict(color=theme.ACCENT, width=1.8, shape="spline", smoothing=0.85), name="Revenue", hovertemplate="%{x|%b %d}<br>$%{y:,.0f}<extra></extra>"))
+        fig.update_layout(title="Revenue context" + title_suffix, hovermode="x unified", margin=dict(t=36, b=16, l=12, r=12))
+        fig.update_xaxes(nticks=6)
+        fig.update_yaxes(nticks=4, tickprefix="$", separatethousands=True)
+        theme.show_chart(fig, 220)
+
     if st.button("Generate executive report", type="primary", use_container_width=True):
         try:
             report = generate_executive_report()
@@ -118,22 +134,21 @@ with right:
 st.markdown('<div class="nx-section">Assistant context</div>', unsafe_allow_html=True)
 result_data = st.session_state.nexus_last_result
 if isinstance(result_data, pd.DataFrame) and not result_data.empty:
-    st.dataframe(result_data, use_container_width=True, hide_index=True)
+    st.dataframe(result_data, use_container_width=True, hide_index=True, height=280)
 else:
-    st.dataframe(df.sort_values("datetime", ascending=False).head(20), use_container_width=True, hide_index=True)
+    st.dataframe(df.sort_values("datetime", ascending=False).head(20), use_container_width=True, hide_index=True, height=280)
 
 
-# Second chart satisfies the operational insight panel requirement and gives the
-# assistant a visual grounding even before the first question is asked.
+# Payment method — decluttered: sorted bars, no extra legend, clean hover
 if not df.empty:
-    mix = df.groupby("payment_method", as_index=False)["total_amount"].sum()
+    mix = df.groupby("payment_method", as_index=False)["total_amount"].sum().sort_values("total_amount")
 else:
     mix = pd.DataFrame({"payment_method": [], "total_amount": []})
-fig = go.Figure(go.Bar(x=mix["payment_method"], y=mix["total_amount"], marker_color=theme.COLORWAY[1], name="Payment revenue"))
-fig.update_layout(title="Payment method context")
-theme.apply_chart_theme(fig)
-fig.update_layout(height=280)
-st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+fig = go.Figure(go.Bar(x=mix["payment_method"], y=mix["total_amount"], marker_color=theme.COLORWAY[1], hovertemplate="%{x}<br>$%{y:,.0f}<extra></extra>"))
+fig.update_layout(title="Payment method context", margin=dict(t=36, b=24, l=12, r=12))
+fig.update_xaxes(tickangle=0)
+fig.update_yaxes(nticks=4, tickprefix="$", separatethousands=True)
+theme.show_chart(fig, 260)
 
 
 theme.footer("Lucciola v2.1.0 · Answers are based on available operational data.")

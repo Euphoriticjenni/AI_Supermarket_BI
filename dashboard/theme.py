@@ -45,15 +45,11 @@ h1, h2, h3 {{ color: {TEXT_PRIMARY}; font-weight: 600; letter-spacing: -0.025em;
 .nx-mark {{ display:grid; place-items:center; width:28px; height:28px; border-radius:6px; background:{ACCENT}; color:white; font-weight:700; }}
 .nx-brand-name {{ color:{TEXT_PRIMARY}; font-size:1rem; font-weight:600; letter-spacing:-.02em; }}
 .nx-brand-sub {{ color:{TEXT_MUTED}; font-size:.65rem; letter-spacing:.1em; text-transform:uppercase; margin-top:2px; }}
-.nx-profile {{ border-top:1px solid {BORDER}; margin:24px 6px 0; padding:16px 4px 0; }}
-.nx-profile-row {{ display:flex; align-items:center; gap:10px; }}
-.nx-avatar {{ width:30px; height:30px; border-radius:50%; display:grid; place-items:center; background:{BG_ELEVATED}; color:{TEXT_PRIMARY}; font-size:.7rem; font-weight:600; }}
-.nx-profile-name {{ color:{TEXT_PRIMARY}; font-size:.8rem; font-weight:600; }}
-.nx-profile-role {{ color:{TEXT_MUTED}; font-size:.7rem; margin-top:2px; }}
+
 .nx-topbar {{ display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid {BORDER}; padding:0 0 18px; margin-bottom:28px; }}
 .nx-crumb {{ color:{TEXT_MUTED}; font-size:.78rem; }}
 .nx-crumb strong {{ color:{TEXT_SECONDARY}; font-weight:500; }}
-.nx-topbar-meta {{ color:{TEXT_MUTED}; font-size:.75rem; display:flex; align-items:center; gap:12px; }}
+.nx-topbar-meta {{ color:{TEXT_MUTED}; font-size:.75rem; }}
 .nx-page-intro {{ margin-bottom:24px; }}
 .nx-page-intro h1 {{ margin:0; font-size:1.65rem; }}
 .nx-page-intro p {{ color:{TEXT_SECONDARY}; margin:6px 0 0; font-size:.9rem; }}
@@ -110,16 +106,12 @@ def render_sidebar_nav(current_page: str) -> None:
         '<div class="nx-brand"><div class="nx-mark">N</div><div><div class="nx-brand-name">Lucciola</div><div class="nx-brand-sub">Retail intelligence</div></div></div>',
         unsafe_allow_html=True,
     )
-    st.sidebar.markdown(
-        '<div class="nx-profile"><div class="nx-profile-row"><div class="nx-avatar">AM</div><div><div class="nx-profile-name">Alex Morgan</div><div class="nx-profile-role">Analyst · Pro plan</div></div></div></div>',
-        unsafe_allow_html=True,
-    )
 
 
 def render_topbar(breadcrumbs: list[str]) -> None:
     crumb = " / ".join(breadcrumbs)
     st.markdown(
-        f'<div class="nx-topbar"><div class="nx-crumb">Lucciola <strong>/ {crumb}</strong></div><div class="nx-topbar-meta">{pd.Timestamp.now():%b %d, %Y}<span class="nx-avatar">AM</span></div></div>',
+        f'<div class="nx-topbar"><div class="nx-crumb">Lucciola <strong>/ {crumb}</strong></div><div class="nx-topbar-meta">{pd.Timestamp.now():%b %d, %Y}</div></div>',
         unsafe_allow_html=True,
     )
 
