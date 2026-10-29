@@ -1,8 +1,4 @@
-<<<<<<< HEAD
 # 🪲✨ Lucciola — Illuminate your data.
-=======
-# 🛒 Lucciola — AI-Powered Supermarket Analytics & BI System
->>>>>>> origin/arena/fcce6ec2-ai-supermarket-bi
 
 > **Supermarket Business Intelligence, beautifully executed.** Turn half a million raw transactions into executive-ready insights, live forecasts, and natural-language answers — in under five minutes.
 
