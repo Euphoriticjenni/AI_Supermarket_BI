@@ -1,0 +1,16 @@
+# NexusBI — "Enterprise Dark" theme (zinc palette, blue accent)
+# Supported native theming; dashboard/theme.py adds typography, spacing and
+# components on top — no brittle background CSS needed for the shell.
+[theme]
+base = "dark"
+primaryColor = "#3B82F6"
+backgroundColor = "#09090B"
+secondaryBackgroundColor = "#18181B"
+textColor = "#FAFAFA"
+
+[server]
+address = "localhost"
+port = 8501
+
+[browser]
+gatherUsageStats = false

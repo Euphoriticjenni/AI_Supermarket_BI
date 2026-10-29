@@ -21,7 +21,13 @@ Notes
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:
+    # python-dotenv is an optional convenience: with it missing, plain
+    # environment variables still work and only the .env file auto-load
+    # below is skipped, so the app keeps booting in minimal environments.
+    load_dotenv = None
 
 # ---------------------------------------------------------------------------
 # Project root & environment
@@ -30,7 +36,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 #: Load .env (if present). Real environment variables keep precedence over
 #: values defined in the file, and .env values override the code defaults.
-load_dotenv(PROJECT_ROOT / ".env")
+if load_dotenv is not None:
+    load_dotenv(PROJECT_ROOT / ".env")
 
 # ---------------------------------------------------------------------------
 # Core generation constants

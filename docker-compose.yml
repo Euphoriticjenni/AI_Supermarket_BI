@@ -1,0 +1,21 @@
+# AI_Supermarket_BI — docker compose configuration
+version: "3.8"
+
+services:
+  supermarket-bi:
+    build: .
+    image: supermarket-bi:latest
+    container_name: supermarket-bi
+    ports:
+      - "8501:8501"
+    volumes:
+      # Persist generated/processed data, the database, reports and logs
+      # outside the container so rebuilds keep their state.
+      - ./data:/app/data
+      - ./database:/app/database
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+    environment:
+      - DATABASE_PATH=/app/database/supermarket.db
+      - LOG_LEVEL=INFO
+    restart: unless-stopped

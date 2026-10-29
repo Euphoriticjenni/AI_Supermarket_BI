@@ -14,13 +14,13 @@ from typing import Dict, Optional
 
 import matplotlib
 matplotlib.use("Agg")  # headless — must be set before pyplot import
-import matplotlib.pyplot as plt
-import pandas as pd
-from fpdf import FPDF
-from sqlalchemy import create_engine
+import matplotlib.pyplot as plt  # noqa: E402  (Agg backend must be configured first)
+import pandas as pd  # noqa: E402
+from fpdf import FPDF  # noqa: E402
+from sqlalchemy import create_engine  # noqa: E402
 
-from src import config
-from src.logger import get_logger
+from src import config  # noqa: E402
+from src.logger import get_logger  # noqa: E402
 
 logger = get_logger(__name__)
 
@@ -327,7 +327,7 @@ def generate_executive_report(
             f"Members placed {member_share:.1f}% of all orders. The customer base "
             f"of {len(customers_df):,} breaks down by membership tier as follows: "
             + ", ".join(f"{tier}: {count:,}" for tier, count in membership_counts.items())
-            + f". Orders by gender: "
+            + ". Orders by gender: "
             + ", ".join(f"{g}: {v:,}" for g, v in gender_mix.items())
             + "."
         )

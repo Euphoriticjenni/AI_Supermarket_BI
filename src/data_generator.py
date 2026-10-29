@@ -1,25 +1,16 @@
-"""Synthetic data generation for the AI_Supermarket_BI project.
+"""Generate realistic, reproducible NexusBI supermarket datasets.
 
-Builds three realistic, inter-related datasets with Faker + numpy + pandas:
+The generator deliberately keeps the expensive sales work vectorised.  Faker
+is used only for customer names and email addresses; dates, quantities,
+prices, customer assignment, and anomaly injection are all produced with
+NumPy.  Run the complete pipeline with::
 
-1. ``supermarket_sales.csv``  (~500,000 rows, 2022-01-01 -> 2023-12-31)
-   with seasonal patterns, hourly peaks, weighted product lines and 50
-   injected anomalies for the anomaly-detection module.
-2. ``products.csv``           (~200 products across the 6 product lines)
-3. ``customers.csv``          (~10,000 customers with membership tiers)
-
-All artefacts are written to ``data/augmented/`` and loaded into the SQLite
-database defined by ``database/schema.sql``.
-
-Usage (from the project root)::
-
-    python -m src.data_generator            # or: make generate-data
+    python -c "from src.data_generator import generate_all; generate_all()"
 """
-import sqlite3
-import uuid
-from datetime import date
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -30,482 +21,504 @@ from src.logger import get_logger
 
 logger = get_logger(__name__)
 
-# ---------------------------------------------------------------------------
-# Static generation pools
-# ---------------------------------------------------------------------------
+DATE_START = pd.Timestamp("2024-01-01")
+DATE_END = pd.Timestamp("2025-12-31")
 
-#: Realistic product-name pools per category (>= 15 names each as required).
-PRODUCT_NAME_POOLS: Dict[str, list] = {
-    "Health and beauty": [
-        "Face Cream", "Herbal Shampoo", "Lipstick", "Vitamin C Serum",
-        "Sunscreen SPF 50", "Toothpaste Pack", "Hand Sanitizer", "Body Lotion",
-        "Pain Relief Balm", "Electric Toothbrush", "Hair Conditioner",
-        "Face Mask Sheet", "Deodorant Stick", "Razor Blade Pack",
-        "Multivitamin Bottle", "Essential Oil Set", "Lip Balm",
-        "Makeup Remover", "Aftershave Lotion", "Nail Care Kit",
-    ],
-    "Electronic accessories": [
-        "USB Cable", "Headphones", "Wireless Mouse", "Bluetooth Speaker",
-        "Power Bank", "Phone Case", "Screen Protector", "Memory Card",
-        "Wall Charger", "LED Desk Lamp", "HDMI Cable", "Wireless Keyboard",
-        "Earphone Splitter", "Laptop Stand", "USB Hub", "Smartwatch Band",
-        "Car Phone Mount", "Mini Tripod", "Extension Cord", "Batteries Pack",
-    ],
-    "Home and lifestyle": [
-        "Pillow", "Table Lamp", "Curtain Set", "Scented Candle",
-        "Bed Sheet Set", "Towel Set", "Kitchen Knife Set", "Cutting Board",
-        "Storage Box", "Photo Frame", "Throw Blanket", "Door Mat",
-        "Laundry Basket", "Dinnerware Set", "Cooking Pot", "Water Pitcher",
-        "Bath Mat", "Wall Clock", "Plant Pot", "Air Freshener",
-    ],
-    "Sports and travel": [
-        "Yoga Mat", "Water Bottle", "Backpack", "Dumbbell Set",
-        "Resistance Band", "Jump Rope", "Running Socks", "Gym Gloves",
-        "Swim Goggles", "Badminton Racket", "Camping Lantern", "Travel Pillow",
-        "Hiking Cap", "Sport Duffel Bag", "Tennis Ball Pack", "Cycling Helmet",
-        "Massage Ball", "Shoe Bag", "Insulated Lunch Box", "Fitness Tracker Band",
-    ],
-    "Food and beverages": [
-        "Organic Coffee", "Green Tea", "Protein Bar", "Instant Noodle Pack",
-        "Chocolate Box", "Olive Oil Bottle", "Honey Jar", "Fruit Jam",
-        "Basmati Rice Bag", "Pasta Pack", "Orange Juice", "Mineral Water Pack",
-        "Potato Chips", "Breakfast Cereal", "Dried Mango Pack", "Peanut Butter",
-        "Coconut Milk Can", "Spice Mix Box", "Biscuit Tin", "Energy Drink Pack",
-    ],
-    "Fashion accessories": [
-        "Leather Belt", "Sunglasses", "Watch", "Silk Scarf",
-        "Baseball Cap", "Canvas Tote Bag", "Handbag", "Ankle Socks Pack",
-        "Hair Clip Set", "Beanie Hat", "Leather Wallet", "Necklace Set",
-        "Earring Set", "Bracelet", "Neck Tie", "Gloves Pair",
-        "Backpack Purse", "Bucket Hat", "Ring Set", "Shawl Wrap",
-    ],
-}
-
-#: Prefixes used to keep product names unique once a pool is exhausted.
-_NAME_MODIFIERS = [
-    "Classic", "Premium", "Value", "Deluxe",
-    "Eco", "Compact", "Signature", "Essential",
+BRANCHES = [
+    "Downtown Central",
+    "Northgate Mall",
+    "Westside Plaza",
+    "East End Market",
+    "Southpark Express",
 ]
+PAYMENT_METHODS = [
+    "Credit Card",
+    "Debit Card",
+    "Cash",
+    "UPI/Mobile",
+    "Store Card",
+    "Gift Card",
+]
+PAYMENT_PROBABILITIES = np.array([0.35, 0.25, 0.15, 0.18, 0.05, 0.02])
+MEMBERSHIP_TIERS = ["Bronze", "Silver", "Gold", "Platinum"]
+MEMBERSHIP_PROBABILITIES = np.array([0.60, 0.25, 0.10, 0.05])
+AGE_GROUPS = ["18-24", "25-34", "35-44", "45-54", "55-64", "65+"]
+AGE_PROBABILITIES = np.array([0.10, 0.30, 0.30, 0.15, 0.10, 0.05])
 
-#: Basket quantity probabilities for quantities 1..10 (sums to 1.0).
-QUANTITY_WEIGHTS = [0.25, 0.20, 0.15, 0.10, 0.08, 0.06, 0.05, 0.04, 0.04, 0.03]
-
-#: Product-line weights: Food and beverages is the best seller (~25%).
-PRODUCT_LINE_WEIGHTS = {
-    "Health and beauty": 0.15,
-    "Electronic accessories": 0.15,
-    "Home and lifestyle": 0.15,
-    "Sports and travel": 0.15,
-    "Food and beverages": 0.25,
-    "Fashion accessories": 0.15,
+# The first price in each tuple is the typical retail price.  The catalogue is
+# expanded with five pack/quality variants, giving 600 products by default.
+PRODUCT_TEMPLATES: dict[str, list[tuple[str, str, float, int, bool, bool]]] = {
+    "Fresh Produce": [
+        ("Bananas", "Fruit", 0.59, 7, True, False),
+        ("Gala Apples", "Fruit", 1.99, 21, True, False),
+        ("Tomatoes", "Vegetables", 2.49, 10, True, False),
+        ("Romaine Lettuce", "Leafy Greens", 2.29, 7, True, False),
+        ("Yellow Onions", "Vegetables", 1.49, 30, True, False),
+        ("Russet Potatoes", "Vegetables", 1.29, 45, True, False),
+        ("Baby Carrots", "Vegetables", 1.79, 14, True, False),
+        ("Red Grapes", "Fruit", 3.99, 14, True, False),
+        ("Navel Oranges", "Fruit", 2.49, 21, True, False),
+        ("Broccoli Crowns", "Vegetables", 2.99, 10, True, False),
+        ("Baby Spinach", "Leafy Greens", 3.49, 8, True, True),
+        ("Hass Avocados", "Fruit", 1.25, 10, True, False),
+        ("Ataulfo Mangoes", "Fruit", 1.49, 10, True, False),
+        ("Strawberries", "Berries", 3.99, 5, True, False),
+    ],
+    "Dairy & Eggs": [
+        ("Whole Milk", "Milk", 3.49, 14, True, False),
+        ("Skim Milk", "Milk", 3.39, 14, True, False),
+        ("Almond Milk", "Milk Alternatives", 4.29, 30, True, True),
+        ("Cheddar Cheese", "Cheese", 5.99, 60, True, False),
+        ("Mozzarella Cheese", "Cheese", 5.49, 45, True, False),
+        ("Greek Yogurt", "Yogurt", 1.39, 30, True, False),
+        ("Salted Butter", "Butter", 4.49, 60, True, False),
+        ("Large Grade A Eggs", "Eggs", 3.99, 30, True, False),
+        ("Cream Cheese", "Cheese", 3.29, 45, True, False),
+        ("Sour Cream", "Dairy", 2.49, 30, True, False),
+    ],
+    "Meat & Seafood": [
+        ("Chicken Breast", "Poultry", 6.99, 5, True, False),
+        ("Ground Beef", "Beef", 7.99, 5, True, False),
+        ("Salmon Fillet", "Seafood", 12.99, 3, True, False),
+        ("Jumbo Shrimp", "Seafood", 10.99, 3, True, False),
+        ("Pork Chops", "Pork", 8.49, 5, True, False),
+        ("Lamb Shoulder", "Lamb", 11.99, 5, True, False),
+        ("Turkey Breast", "Poultry", 8.99, 5, True, False),
+        ("Tuna Steak", "Seafood", 13.49, 3, True, False),
+        ("Center Cut Bacon", "Pork", 6.49, 21, True, False),
+        ("Italian Sausages", "Prepared Meat", 5.99, 14, True, False),
+    ],
+    "Bakery": [
+        ("White Bread", "Bread", 2.49, 7, True, False),
+        ("Whole Wheat Bread", "Bread", 3.49, 7, True, True),
+        ("Butter Croissants", "Pastries", 4.99, 4, True, False),
+        ("Plain Bagels", "Bread", 3.99, 7, True, False),
+        ("Blueberry Muffins", "Pastries", 4.49, 5, True, False),
+        ("Chocolate Cake", "Cakes", 12.99, 4, True, False),
+        ("Chocolate Chip Cookies", "Cookies", 3.99, 21, False, False),
+        ("Glazed Donuts", "Pastries", 5.49, 3, True, False),
+        ("Pita Bread", "Bread", 3.29, 10, True, False),
+        ("Garlic Naan", "Bread", 4.49, 10, True, False),
+    ],
+    "Beverages": [
+        ("Cola", "Soft Drinks", 2.49, 180, False, False),
+        ("Diet Cola", "Soft Drinks", 2.49, 180, False, False),
+        ("Orange Juice", "Juice", 4.99, 21, True, False),
+        ("Apple Juice", "Juice", 4.49, 30, False, False),
+        ("Bottled Water", "Water", 4.99, 365, False, False),
+        ("Sparkling Water", "Water", 5.49, 365, False, False),
+        ("Energy Drink", "Energy Drinks", 2.99, 270, False, False),
+        ("Iced Tea", "Ready-to-Drink", 2.49, 180, False, False),
+        ("Coconut Water", "Juice", 3.49, 120, False, True),
+        ("Lemonade", "Juice", 3.99, 30, True, False),
+    ],
+    "Snacks": [
+        ("Potato Chips", "Chips", 3.49, 120, False, False),
+        ("Tortilla Chips", "Chips", 3.99, 120, False, False),
+        ("Pretzels", "Savoury Snacks", 2.99, 150, False, False),
+        ("Microwave Popcorn", "Popcorn", 4.49, 180, False, False),
+        ("Granola Bars", "Snack Bars", 4.99, 180, False, True),
+        ("Trail Mix", "Nuts & Seeds", 6.99, 120, False, True),
+        ("Saltine Crackers", "Crackers", 2.49, 180, False, False),
+        ("Rice Cakes", "Healthy Snacks", 3.49, 120, False, False),
+        ("Mixed Nuts", "Nuts & Seeds", 8.99, 180, False, True),
+        ("Chocolate Candy Bars", "Confectionery", 1.49, 240, False, False),
+    ],
+    "Frozen Foods": [
+        ("Frozen Pizza", "Frozen Meals", 6.99, 365, False, False),
+        ("Vanilla Ice Cream", "Ice Cream", 5.99, 365, True, False),
+        ("Frozen Vegetables", "Frozen Produce", 2.99, 365, False, True),
+        ("Chicken Nuggets", "Frozen Poultry", 7.49, 365, False, False),
+        ("Frozen Fries", "Frozen Sides", 3.99, 365, False, False),
+        ("Fish Sticks", "Frozen Seafood", 6.49, 365, False, False),
+        ("Frozen Dumplings", "Frozen Meals", 5.49, 365, False, False),
+        ("Mango Sorbet", "Frozen Desserts", 5.49, 365, True, False),
+        ("Frozen Waffles", "Frozen Breakfast", 4.49, 365, False, False),
+        ("Frozen Berry Blend", "Frozen Produce", 6.99, 365, False, True),
+    ],
+    "Pantry Staples": [
+        ("Long Grain Rice", "Rice & Grains", 4.99, 730, False, False),
+        ("Spaghetti Pasta", "Pasta", 2.29, 730, False, False),
+        ("All-Purpose Flour", "Baking", 3.49, 365, False, False),
+        ("Granulated Sugar", "Baking", 2.99, 730, False, False),
+        ("Sea Salt", "Seasonings", 1.99, 1095, False, False),
+        ("Extra Virgin Olive Oil", "Cooking Oils", 9.99, 730, False, True),
+        ("Soy Sauce", "Sauces", 3.49, 730, False, False),
+        ("Canned Tomatoes", "Canned Goods", 1.79, 730, False, False),
+        ("Creamy Peanut Butter", "Spreads", 4.49, 365, False, False),
+        ("Corn Flakes Cereal", "Breakfast", 5.49, 365, False, False),
+        ("Old Fashioned Oatmeal", "Breakfast", 4.29, 365, False, True),
+        ("Wildflower Honey", "Spreads", 7.99, 730, False, True),
+    ],
+    "Household": [
+        ("Paper Towels", "Paper Products", 9.99, 1095, False, False),
+        ("Toilet Paper", "Paper Products", 11.99, 1095, False, False),
+        ("Dish Soap", "Cleaning", 3.49, 730, False, False),
+        ("Laundry Detergent", "Laundry", 12.99, 730, False, False),
+        ("Trash Bags", "Storage & Waste", 8.49, 730, False, False),
+        ("Kitchen Sponges", "Cleaning", 3.99, 730, False, False),
+        ("Hand Soap", "Cleaning", 2.99, 730, False, False),
+        ("Liquid Bleach", "Cleaning", 4.99, 365, False, False),
+        ("Air Freshener", "Home Fragrance", 3.99, 730, False, False),
+        ("Aluminum Foil", "Kitchen Supplies", 5.99, 1095, False, False),
+    ],
+    "Personal Care": [
+        ("Moisturizing Shampoo", "Hair Care", 7.99, 730, False, False),
+        ("Fluoride Toothpaste", "Oral Care", 4.49, 730, False, False),
+        ("Antiperspirant Deodorant", "Body Care", 5.99, 730, False, False),
+        ("Moisturizing Body Wash", "Body Care", 6.49, 730, False, False),
+        ("Broad Spectrum Sunscreen", "Skin Care", 10.99, 730, False, False),
+        ("Nourishing Lip Balm", "Skin Care", 2.49, 730, False, True),
+        ("Hand Cream", "Skin Care", 5.49, 730, False, False),
+        ("Disposable Razors", "Shaving", 8.99, 730, False, False),
+        ("Hair Conditioner", "Hair Care", 7.99, 730, False, False),
+        ("Cotton Swabs", "Personal Hygiene", 2.99, 1095, False, False),
+    ],
+    "Baby & Kids": [
+        ("Newborn Diapers", "Diapers", 11.99, 730, False, False),
+        ("Stage 3 Diapers", "Diapers", 14.99, 730, False, False),
+        ("Infant Formula", "Baby Nutrition", 24.99, 365, False, False),
+        ("Organic Baby Food", "Baby Nutrition", 2.49, 365, False, True),
+        ("Sensitive Baby Wipes", "Baby Care", 5.99, 730, False, False),
+        ("Children's Vitamins", "Kids Wellness", 9.99, 730, False, False),
+        ("Gentle Baby Shampoo", "Baby Care", 6.99, 730, False, False),
+        ("Fruit Snack Pouches", "Kids Snacks", 4.99, 180, False, False),
+        ("Sippy Cup", "Feeding", 7.99, 1095, False, False),
+        ("Kids Toothbrush", "Oral Care", 3.49, 730, False, False),
+    ],
+    "Health & Wellness": [
+        ("Daily Multivitamins", "Vitamins", 12.99, 730, False, False),
+        ("Ibuprofen Tablets", "Pain Relief", 8.99, 730, False, False),
+        ("Adhesive Bandages", "First Aid", 4.99, 1095, False, False),
+        ("Honey Cough Syrup", "Cold & Flu", 9.99, 730, False, True),
+        ("Whey Protein Powder", "Sports Nutrition", 29.99, 730, False, False),
+        ("Daily Probiotics", "Digestive Health", 19.99, 365, False, False),
+        ("Vitamin D3", "Vitamins", 10.99, 730, False, False),
+        ("Electrolyte Powder", "Sports Nutrition", 14.99, 730, False, False),
+        ("Digital Thermometer", "First Aid", 12.49, 1095, False, False),
+        ("Magnesium Capsules", "Vitamins", 13.99, 730, False, False),
+    ],
 }
 
-#: Store opening hours used when clipping the hour-of-day mixture.
-HOUR_MIN, HOUR_MAX = 8, 22
+CATEGORY_ORDER = list(PRODUCT_TEMPLATES)
+CATEGORY_WEIGHTS = np.array([0.16, 0.10, 0.10, 0.08, 0.10, 0.08, 0.07, 0.12, 0.06, 0.05, 0.03, 0.05])
+CATEGORY_WEIGHTS /= CATEGORY_WEIGHTS.sum()
+VARIANT_NAMES = ["Classic", "Value", "Premium", "Organic", "Family Pack"]
+VARIANT_FACTORS = np.array([1.00, 0.90, 1.12, 1.18, 1.30])
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-def _seed_everything(seed: int) -> Faker:
-    """Seed numpy and Faker so every run is fully reproducible.
-
-    Parameters
-    ----------
-    seed:
-        The seed value (``config.RANDOM_SEED`` by default).
-
-    Returns
-    -------
-    Faker
-        A seeded Faker instance ready for deterministic generation.
-    """
-    np.random.seed(seed)
-    Faker.seed(seed)
-    return Faker()
+def _rng(seed: int) -> np.random.Generator:
+    """Return an isolated random generator for reproducible independent calls."""
+    return np.random.default_rng(seed)
 
 
-def _unique_invoice_ids(n: int) -> np.ndarray:
-    """Generate ``n`` guaranteed-unique invoice IDs ("INV-XXXXXX").
+def generate_products(n_products: int = 600, seed: int = 42) -> pd.DataFrame:
+    """Create a varied product catalogue across all twelve categories."""
+    if n_products < len(CATEGORY_ORDER):
+        raise ValueError(f"n_products must be at least {len(CATEGORY_ORDER)}")
 
-    ``uuid4().hex[:6].upper()`` draws from ~16.7M possibilities, so with
-    500K rows the birthday paradox produces a few thousand collisions; this
-    helper simply re-draws the collided portion until every ID is unique
-    (required by the ``sales`` PRIMARY KEY).
-    """
-    collected: list = []
-    seen: set = set()
-    while len(collected) < n:
-        needed = n - len(collected)
-        # +5% slack absorbs the expected collision rate in one extra pass.
-        batch = [f"INV-{uuid.uuid4().hex[:6].upper()}" for _ in range(int(needed * 1.05) + 16)]
-        for invoice_id in batch:
-            if invoice_id not in seen:
-                seen.add(invoice_id)
-                collected.append(invoice_id)
-                if len(collected) == n:
-                    break
-    return np.array(collected, dtype=object)
-
-
-def _build_date_probabilities() -> Tuple[pd.DatetimeIndex, np.ndarray]:
-    """Return the date index and normalised sampling probabilities.
-
-    Implements the seasonal business rules:
-
-    * December:  +20%  (holiday shopping)
-    * March:     +15%  (spring sales)
-    * February:  -10%  (post-holiday dip)
-    * Weekends:  +25%  versus weekdays
-    """
-    dates = pd.date_range(start=config.DATE_START, end=config.DATE_END, freq="D")
-    weights = np.ones(len(dates), dtype=float)
-    weights[dates.month == 12] *= 1.20
-    weights[dates.month == 3] *= 1.15
-    weights[dates.month == 2] *= 0.90
-    weights[dates.dayofweek >= 5] *= 1.25
-    probabilities = weights / weights.sum()
-    return dates, probabilities
-
-
-def _format_times(hours_float: np.ndarray) -> np.ndarray:
-    """Convert fractional hours into "HH:MM" strings with random minutes."""
-    hours = np.clip(hours_float, HOUR_MIN, HOUR_MAX).astype(int)
-    minutes = np.random.randint(0, 60, size=len(hours))
-    return np.array([f"{h:02d}:{m:02d}" for h, m in zip(hours, minutes)], dtype=object)
-
-
-def _sample_hours(n: int) -> np.ndarray:
-    """Draw ``n`` hours from a mixture of 3 normals peaking at 10/13/17."""
-    component = np.random.choice([0, 1, 2], size=n, p=[0.30, 0.25, 0.45])
-    means = np.array([10.0, 13.0, 17.0])[component]
-    stds = np.array([1.5, 1.0, 1.5])[component]
-    return np.random.normal(loc=means, scale=stds)
-
-
-# ---------------------------------------------------------------------------
-# Dataset generators
-# ---------------------------------------------------------------------------
-def generate_sales_data(n: int = None) -> pd.DataFrame:
-    """Generate the synthetic supermarket sales dataset.
-
-    The dataset follows the classic supermarket sales schema (invoice-level
-    rows) enriched with realistic seasonality, hour-of-day peaks, weighted
-    product lines and exactly ``config.ANOMALIES_TO_INJECT`` extreme
-    transactions flagged in a boolean ``Is_Injected_Anomaly`` column (kept in
-    the CSV; excluded from the database load to match schema.sql).
-
-    Parameters
-    ----------
-    n:
-        Number of rows to generate. Defaults to ``config.NUM_RECORDS``.
-
-    Returns
-    -------
-    pandas.DataFrame
-        The generated sales data with 18 columns.
-    """
-    n = int(n) if n else config.NUM_RECORDS
-    _seed_everything(config.RANDOM_SEED)
-    logger.info("Generating {:,} sales rows spanning {} -> {} ...", n, config.DATE_START, config.DATE_END)
-
-    dates, date_probabilities = _build_date_probabilities()
-    date_strings = np.datetime_as_string(dates.values.astype("datetime64[D]"))
-    branch_codes = np.array(list(config.BRANCHES.keys()))
-    branch_cities = np.array([config.BRANCHES[b] for b in branch_codes])
-    lines = np.array(config.PRODUCT_LINES)
-    line_probabilities = np.array([PRODUCT_LINE_WEIGHTS[line] for line in lines])
-    line_probabilities = line_probabilities / line_probabilities.sum()
-    invoice_ids = _unique_invoice_ids(n)
-
-    chunks = []
-    chunk_size = 100_000
-    generated = 0
-    while generated < n:
-        size = min(chunk_size, n - generated)
-
-        date_idx = np.random.choice(len(dates), size=size, p=date_probabilities)
-        branch_idx = np.random.randint(0, len(branch_codes), size=size)
-        line_idx = np.random.choice(len(lines), size=size, p=line_probabilities)
-
-        chunk = pd.DataFrame({
-            "Invoice_ID": invoice_ids[generated:generated + size],
-            "Date": date_strings[date_idx],
-            "Time": _format_times(_sample_hours(size)),
-            "Branch": branch_codes[branch_idx],
-            "City": branch_cities[branch_idx],
-            "Customer_Type": np.random.choice(config.CUSTOMER_TYPES, size=size, p=[0.65, 0.35]),
-            "Gender": np.random.choice(config.GENDERS, size=size, p=[0.5, 0.5]),
-            "Product_Line": lines[line_idx],
-            "Unit_Price": np.round(np.random.uniform(10.0, 100.0, size=size), 2),
-            "Quantity": np.random.choice(np.arange(1, 11), size=size, p=QUANTITY_WEIGHTS),
-            "Payment": np.random.choice(config.PAYMENT_METHODS, size=size),
+    rng = _rng(seed)
+    rows: list[dict[str, object]] = []
+    for product_number in range(n_products):
+        category = CATEGORY_ORDER[product_number % len(CATEGORY_ORDER)]
+        cycle_number = product_number // len(CATEGORY_ORDER)
+        category_items = PRODUCT_TEMPLATES[category]
+        name, subcategory, price, shelf_life, perishable, organic = category_items[
+            cycle_number % len(category_items)
+        ]
+        # Cycling through product templates and variants keeps the catalogue
+        # balanced without making either names or prices flat.
+        variant_number = (cycle_number // len(category_items)) % len(VARIANT_NAMES)
+        variant = VARIANT_NAMES[variant_number]
+        if variant == "Classic":
+            display_name = name
+        else:
+            display_name = f"{variant} {name}"
+        if variant == "Family Pack":
+            display_price = price * 1.30
+        else:
+            display_price = price * VARIANT_FACTORS[variant_number]
+        display_price *= rng.uniform(0.96, 1.04)
+        display_price = max(0.49, round(display_price, 2))
+        margin = rng.uniform(0.58, 0.78)
+        rows.append({
+            "product_id": f"PROD-{product_number + 1:05d}",
+            "name": display_name,
+            "category": category,
+            "subcategory": subcategory,
+            "unit_cost": round(display_price * margin, 2),
+            "unit_price": display_price,
+            "supplier": f"Supplier {chr(65 + (product_number % 12))}-{1 + product_number % 8}",
+            "shelf_life_days": shelf_life,
+            "is_perishable": bool(perishable),
+            "is_organic": bool(organic or variant == "Organic"),
         })
 
-        chunk["COGS"] = np.round(chunk["Unit_Price"] * chunk["Quantity"], 2)
-        chunk["Tax_5pct"] = np.round(chunk["COGS"] * config.TAX_RATE, 2)
-        chunk["Total"] = np.round(chunk["COGS"] + chunk["Tax_5pct"], 2)
-        chunk["Gross_Margin_Pct"] = 4.76
-        chunk["Gross_Income"] = chunk["Tax_5pct"]
-        chunk["Rating"] = np.round(
-            np.clip(np.random.normal(7.0, 1.5, size=size), 1.0, 10.0), 1
-        )
-
-        chunks.append(chunk)
-        generated += size
-        logger.info("Generated {:,}/{} sales rows ...", generated, n)
-
-    sales = pd.concat(chunks, ignore_index=True)
-
-    # ---- anomaly injection (ground truth for the anomaly module) ---------
-    sales["Is_Injected_Anomaly"] = False
-    anomaly_count = min(config.ANOMALIES_TO_INJECT, n)
-    anomaly_idx = np.random.choice(n, size=anomaly_count, replace=False)
-    sales.loc[anomaly_idx, "Quantity"] = sales.loc[anomaly_idx, "Quantity"] * 10
-    sales.loc[anomaly_idx, "Unit_Price"] = np.round(sales.loc[anomaly_idx, "Unit_Price"] * 5, 2)
-    sales.loc[anomaly_idx, "COGS"] = np.round(
-        sales.loc[anomaly_idx, "Unit_Price"] * sales.loc[anomaly_idx, "Quantity"], 2
-    )
-    sales.loc[anomaly_idx, "Tax_5pct"] = np.round(sales.loc[anomaly_idx, "COGS"] * config.TAX_RATE, 2)
-    sales.loc[anomaly_idx, "Total"] = np.round(
-        sales.loc[anomaly_idx, "COGS"] + sales.loc[anomaly_idx, "Tax_5pct"], 2
-    )
-    sales.loc[anomaly_idx, "Gross_Income"] = sales.loc[anomaly_idx, "Tax_5pct"]
-    sales.loc[anomaly_idx, "Is_Injected_Anomaly"] = True
-    logger.info("Injected {} anomalous transactions (10x quantity, 5x price).", anomaly_count)
-
-    sales = sales[[
-        "Invoice_ID", "Date", "Time", "Branch", "City", "Customer_Type",
-        "Gender", "Product_Line", "Unit_Price", "Quantity", "Tax_5pct",
-        "Total", "Payment", "COGS", "Gross_Margin_Pct", "Gross_Income",
-        "Rating", "Is_Injected_Anomaly",
-    ]]
-    logger.info("Sales dataset ready: {:,} rows x {} columns.", len(sales), sales.shape[1])
-    return sales
-
-
-def generate_products_data(n: int = 200) -> pd.DataFrame:
-    """Generate the product catalogue.
-
-    Each product belongs to one of the six product lines, has a supplier
-    code, cost, selling price (cost x 1.2-1.8), stock level and reorder
-    level. Ten products are intentionally left at zero stock so the
-    inventory module has genuine stockouts to flag.
-
-    Parameters
-    ----------
-    n:
-        Number of products to create (default 200).
-
-    Returns
-    -------
-    pandas.DataFrame
-        The generated product catalogue.
-    """
-    n = int(n)
-    fake = _seed_everything(config.RANDOM_SEED + 1)
-    logger.info("Generating {} products ...", n)
-
-    # Distribute products as evenly as possible across the 6 categories.
-    per_category = {line: n // len(config.PRODUCT_LINES) for line in config.PRODUCT_LINES}
-    for line in config.PRODUCT_LINES[: n % len(config.PRODUCT_LINES)]:
-        per_category[line] += 1
-
-    used_names: set = set()
-    rows = []
-    for category, count in per_category.items():
-        pool = PRODUCT_NAME_POOLS[category]
-        for i in range(count):
-            base_name = pool[i % len(pool)]
-            product_name = base_name
-            modifier_round = 0
-            while product_name in used_names:
-                modifier = _NAME_MODIFIERS[modifier_round % len(_NAME_MODIFIERS)]
-                suffix = modifier_round // len(_NAME_MODIFIERS) + 1
-                product_name = f"{modifier} {base_name}" + (f" {suffix}" if suffix > 1 else "")
-                modifier_round += 1
-            used_names.add(product_name)
-            cost = round(np.random.uniform(5.0, 60.0), 2)
-            rows.append({
-                "Product_ID": f"PROD-{len(rows) + 1:04d}",
-                "Product_Name": product_name,
-                "Category": category,
-                "Supplier": f"Supplier_{chr(np.random.randint(ord('A'), ord('J') + 1))}{np.random.randint(1, 6)}",
-                "Cost": cost,
-                "Selling_Price": round(cost * np.random.uniform(1.2, 1.8), 2),
-                "Stock": int(np.random.randint(0, 501)),
-                "Reorder_Level": int(np.random.randint(20, 51)),
-            })
-
     products = pd.DataFrame(rows)
-    # Force ~10 genuine stockouts for the inventory stockout analysis.
-    zero_idx = np.random.choice(n, size=min(10, n), replace=False)
-    products.loc[zero_idx, "Stock"] = 0
-    logger.info("Product catalogue ready: {} products, {} forced stockouts.", n, len(zero_idx))
+    logger.info("Generated {:,} products across {} categories.", len(products), products["category"].nunique())
     return products
 
 
-def generate_customers_data(sales_df: pd.DataFrame, n: int = 10000) -> pd.DataFrame:
-    """Generate the customer base from the sales spending distribution.
+def generate_customers(n_customers: int = 15_000, seed: int = 42) -> pd.DataFrame:
+    """Create customer profiles with stable preferences and realistic segments."""
+    if n_customers <= 0:
+        raise ValueError("n_customers must be positive")
+    rng = _rng(seed + 1)
+    fake = Faker()
+    fake.seed_instance(seed + 1)
 
-    ``Total_Spent`` is sampled from the empirical distribution of the sales
-    ``Total`` column, and ``Visit_Count`` is a random 1-200 value scaled by
-    each customer's spend relative to the mean, producing a realistic
-    positive correlation between the two columns.
+    first_names = np.array([fake.first_name() for _ in range(n_customers)], dtype=object)
+    last_names = np.array([fake.last_name() for _ in range(n_customers)], dtype=object)
+    email_addresses = []
+    for i in range(n_customers):
+        raw_email = fake.email()
+        domain = raw_email.split("@", 1)[-1]
+        local = f"{first_names[i].lower().replace(' ', '.')}.{last_names[i].lower().replace(' ', '.')}"
+        email_addresses.append(f"{local}.{i + 1}@{domain}")
 
-    Parameters
-    ----------
-    sales_df:
-        The generated sales DataFrame (used for the spending distribution).
-    n:
-        Number of customers to create (default 10,000).
-
-    Returns
-    -------
-    pandas.DataFrame
-        The generated customer base.
-    """
-    n = int(n)
-    fake = _seed_everything(config.RANDOM_SEED + 2)
-    logger.info("Generating {:,} customers ...", n)
-
-    join_start = date(2020, 1, 1)
-    join_end = date(2023, 12, 31)
-
-    total_spent = (
-        sales_df["Total"].sample(n=n, replace=True, random_state=config.RANDOM_SEED).to_numpy()
-        if sales_df is not None and len(sales_df) > 0
-        else np.round(np.random.uniform(20.0, 900.0, size=n), 2)
-    )
-    spend_ratio = total_spent / total_spent.mean()
-    visit_count = np.clip(
-        np.round(np.random.uniform(1.0, 200.0, size=n) * spend_ratio), 1, 200
-    ).astype(int)
+    tiers = rng.choice(MEMBERSHIP_TIERS, size=n_customers, p=MEMBERSHIP_PROBABILITIES)
+    age_groups = rng.choice(AGE_GROUPS, size=n_customers, p=AGE_PROBABILITIES)
+    preferred_payment = rng.choice(PAYMENT_METHODS, size=n_customers, p=PAYMENT_PROBABILITIES)
+    preferred_branch = rng.choice(BRANCHES, size=n_customers, p=[0.33, 0.23, 0.20, 0.14, 0.10])
+    tier_visit_factor = pd.Series(tiers).map({"Bronze": 0.8, "Silver": 1.1, "Gold": 1.6, "Platinum": 2.2}).to_numpy()
+    visits = np.clip(rng.gamma(shape=2.2, scale=1.7, size=n_customers) * tier_visit_factor, 0.2, 18.0)
+    join_days = rng.integers(0, (pd.Timestamp("2025-12-31") - pd.Timestamp("2021-01-01")).days + 1, n_customers)
+    join_dates = pd.Timestamp("2021-01-01") + pd.to_timedelta(join_days, unit="D")
+    phone_digits = rng.integers(0, 10, size=(n_customers, 10)).astype(str)
+    # Format phone digits after generation; Faker is deliberately not used for
+    # numeric fields in this generator.
+    phones = np.array([f"+1-{''.join(row[:3])}-{''.join(row[3:6])}-{''.join(row[6:])}" for row in phone_digits], dtype=object)
 
     customers = pd.DataFrame({
-        "Customer_ID": [f"CUST-{i:05d}" for i in range(1, n + 1)],
-        "Gender": np.random.choice(config.GENDERS, size=n, p=[0.5, 0.5]),
-        "Age": np.clip(np.random.normal(35, 12, size=n), 18, 70).astype(int),
-        "City": np.random.choice(sorted(set(config.BRANCHES.values())), size=n),
-        "Membership": np.random.choice(
-            config.MEMBERSHIP_TIERS, size=n, p=[0.10, 0.20, 0.30, 0.40]
-        ),
-        "Join_Date": [fake.date_between(start_date=join_start, end_date=join_end).isoformat() for _ in range(n)],
-        "Total_Spent": np.round(total_spent, 2),
-        "Visit_Count": visit_count,
+        "customer_id": [f"CUST-{i:05d}" for i in range(1, n_customers + 1)],
+        "first_name": first_names,
+        "last_name": last_names,
+        "email": email_addresses,
+        "phone": phones,
+        "join_date": join_dates.strftime("%Y-%m-%d"),
+        "membership_tier": tiers,
+        "age_group": age_groups,
+        "preferred_branch": preferred_branch,
+        "avg_weekly_visits": np.round(visits, 2),
+        "preferred_payment": preferred_payment,
+        "is_active": rng.random(n_customers) < 0.85,
     })
-    logger.info("Customer base ready: {:,} customers.", n)
+    logger.info("Generated {:,} customers.", len(customers))
     return customers
 
 
-# ---------------------------------------------------------------------------
-# Database loading
-# ---------------------------------------------------------------------------
-def load_to_database(
-    sales_df: Optional[pd.DataFrame] = None,
-    products_df: Optional[pd.DataFrame] = None,
-    customers_df: Optional[pd.DataFrame] = None,
-    db_path: Optional[str] = None,
-) -> Dict[str, int]:
-    """Load the three datasets into SQLite using the schema.sql DDL.
-
-    The helper column ``Is_Injected_Anomaly`` is intentionally excluded from
-    the database so the tables match schema.sql exactly (the flag lives in
-    the CSV, which is what the anomaly-detection module reads).
-
-    Tables are dropped and re-created through schema.sql before an append:
-    this gives the same reset semantics as ``if_exists='replace'`` while
-    preserving the declared PRIMARY KEYs, CHECKs and the four analytical
-    indexes (pandas' native 'replace' would rebuild the tables without
-    them).
-
-    Any DataFrame left as ``None`` is read from the CSVs in
-    ``data/augmented/`` so the database can be rebuilt without regenerating.
-
-    Returns
-    -------
-    dict
-        Row counts per table, e.g. ``{"sales": 500000, ...}``.
-    """
-    from sqlalchemy import create_engine, text
-
-    db_path = Path(db_path) if db_path else Path(config.DATABASE_PATH)
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-
-    if sales_df is None:
-        sales_df = pd.read_csv(config.SALES_DATA_FILE)
-        logger.info("Loaded {:,} sales rows from {} for DB import.", len(sales_df), config.SALES_DATA_FILE)
-    if products_df is None:
-        products_df = pd.read_csv(config.PRODUCTS_DATA_FILE)
-    if customers_df is None:
-        # keep_default_na=False: the literal membership tier "None" must not
-        # be parsed as NaN (it is in pandas' default NA list).
-        customers_df = pd.read_csv(config.CUSTOMERS_DATA_FILE, keep_default_na=False)
-        customers_df["Membership"] = customers_df["Membership"].fillna("None")
-
-    schema_path = Path(config.PROJECT_ROOT) / "database" / "schema.sql"
-    schema_sql = schema_path.read_text(encoding="utf-8")
-
-    logger.info("Rebuilding SQLite database at {} ...", db_path)
-    with sqlite3.connect(str(db_path)) as conn:
-        for table in ("sales", "products", "customers"):
-            conn.execute(f"DROP TABLE IF EXISTS {table};")
-        conn.executescript(schema_sql)
-
-    engine = create_engine(f"sqlite:///{db_path.as_posix()}")
-    try:
-        sales_db = sales_df.drop(columns=["Is_Injected_Anomaly"], errors="ignore")
-        sales_db.to_sql("sales", engine, if_exists="append", index=False, chunksize=50_000)
-        products_df.to_sql("products", engine, if_exists="append", index=False)
-        customers_df.to_sql("customers", engine, if_exists="append", index=False)
-
-        row_counts = {}
-        with engine.connect() as conn:
-            for table in ("sales", "products", "customers"):
-                row_counts[table] = int(conn.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar())
-                logger.info("Table '{}': {:,} rows loaded.", table, row_counts[table])
-    finally:
-        engine.dispose()
-
-    logger.info("Database load complete: {}", row_counts)
-    return row_counts
+def _date_probabilities() -> tuple[pd.DatetimeIndex, np.ndarray]:
+    """Return daily probabilities containing the requested seasonality."""
+    dates = pd.date_range(DATE_START, DATE_END, freq="D")
+    month_factors = {1: 0.85, 2: 0.92, 3: 1.05, 4: 1.05, 5: 1.0, 6: 1.0,
+                     7: 1.10, 8: 1.10, 9: 1.08, 10: 1.0, 11: 1.15, 12: 1.35}
+    weekday_factors = {0: 1.0, 1: 1.0, 2: 0.95, 3: 1.0, 4: 1.15, 5: 1.30, 6: 1.20}
+    # Split the monthly revenue effect between transaction frequency and
+    # basket quantity.  This avoids applying (for example) December's 35%
+    # uplift twice while still making both dimensions seasonal.
+    factors = np.array([np.sqrt(month_factors[d.month]) * weekday_factors[d.dayofweek] for d in dates])
+    return dates, factors / factors.sum()
 
 
-# ---------------------------------------------------------------------------
-# Orchestrator
-# ---------------------------------------------------------------------------
-def generate_all(n_records: Optional[int] = None) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Run the full generation pipeline and persist every artefact.
+def _hour_probabilities() -> np.ndarray:
+    """Hour weights with near-zero overnight traffic and evening peak."""
+    weights = np.array([0.002, 0.001, 0.001, 0.002, 0.001, 0.002, 0.003, 0.006,
+                        0.060, 0.080, 0.070, 0.070, 0.100, 0.110, 0.070, 0.060,
+                        0.070, 0.110, 0.140, 0.140, 0.120, 0.070, 0.050, 0.040])
+    return weights / weights.sum()
 
-    1. Generate sales / products / customers datasets.
-    2. Save them as CSVs under ``data/augmented/``.
-    3. Load everything into the SQLite database.
 
-    Returns
-    -------
-    tuple
-        The three generated DataFrames (sales, products, customers).
-    """
+def _category_scores(branches: np.ndarray, hours: np.ndarray, years: np.ndarray) -> np.ndarray:
+    """Build row-wise category probabilities from branch/hour preferences."""
+    base = CATEGORY_WEIGHTS.copy()
+    branch_adjustments = np.ones((len(BRANCHES), len(CATEGORY_ORDER)))
+    # Branch descriptions are reflected in demand, not merely labels.
+    branch_adjustments[0, [3, 4, 5]] = [1.35, 1.30, 1.20]
+    branch_adjustments[1, [1, 6, 7, 10]] = [1.35, 1.35, 1.20, 1.30]
+    branch_adjustments[2, [0, 2, 11]] = [1.35, 1.25, 1.40]
+    branch_adjustments[3, [5, 6, 7]] = [1.30, 1.35, 1.30]
+    branch_adjustments[4, [3, 4, 5, 6]] = [1.35, 1.40, 1.25, 1.20]
+    hour_adjustments = np.ones((24, len(CATEGORY_ORDER)))
+    hour_adjustments[8:11, [1, 3, 4]] = [1.35, 1.50, 1.20]
+    hour_adjustments[12:15, [4, 5, 3]] = [1.45, 1.35, 1.20]
+    hour_adjustments[17:21, [0, 2, 7, 1]] = [1.25, 1.35, 1.30, 1.20]
+    hour_adjustments[[21, 22, 23], [4, 5, 6]] = [1.35, 1.35, 1.25]
+    trends_2025 = np.ones(len(CATEGORY_ORDER))
+    trends_2025[0] = 1.15
+    trends_2025[6] = 0.95
+    trends_2025[11] = 1.22
+    scores = base * branch_adjustments[branches] * hour_adjustments[hours]
+    scores *= np.where(years[:, None] == 2025, trends_2025, 1.0)
+    return scores / scores.sum(axis=1, keepdims=True)
+
+
+def generate_transactions(
+    products: Optional[pd.DataFrame] = None,
+    customers: Optional[pd.DataFrame] = None,
+    n_transactions: int = 750_000,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """Generate sales lines with seasonality, preferences, and 200 anomalies."""
+    # A convenient ``generate_transactions(1000)`` form is useful in notebooks.
+    if isinstance(products, (int, np.integer)) and customers is None:
+        n_transactions, products = int(products), None
+    if n_transactions <= 0:
+        raise ValueError("n_transactions must be positive")
+    products = products if products is not None else generate_products(seed=seed)
+    customers = customers if customers is not None else generate_customers(seed=seed)
+    rng = _rng(seed + 2)
+    n = int(n_transactions)
+    logger.info("Generating {:,} transactions for {} -> {} ...", n, DATE_START.date(), DATE_END.date())
+
+    dates, date_probabilities = _date_probabilities()
+    date_indices = rng.choice(len(dates), size=n, p=date_probabilities)
+    # Ensure the advertised range is visible even in small smoke-test runs.
+    if n >= 2:
+        date_indices[0] = 0
+        date_indices[1] = len(dates) - 1
+    date_values = dates.to_numpy()[date_indices]
+    date_series = pd.DatetimeIndex(date_values)
+    years = date_series.year.to_numpy()
+    months = date_series.month.to_numpy()
+    season_factors = np.array([{1: 0.85, 2: 0.92, 3: 1.05, 4: 1.05, 5: 1.0, 6: 1.0,
+                                7: 1.10, 8: 1.10, 9: 1.08, 10: 1.0, 11: 1.15, 12: 1.35}[month] for month in months])
+
+    customer_probabilities = customers["membership_tier"].map({"Bronze": 1.0, "Silver": 1.25, "Gold": 1.65, "Platinum": 2.2}).to_numpy(dtype=float)
+    customer_probabilities /= customer_probabilities.sum()
+    customer_indices = rng.choice(len(customers), size=n, p=customer_probabilities)
+    customer_rows = customers.iloc[customer_indices].reset_index(drop=True)
+
+    preferred_branch = customer_rows["preferred_branch"].to_numpy(dtype=object)
+    branch_lookup = {branch: index for index, branch in enumerate(BRANCHES)}
+    branch_indices = pd.Series(preferred_branch).map(branch_lookup).to_numpy(dtype=np.int8)
+    random_branch_indices = rng.choice(len(BRANCHES), size=n, p=[0.33, 0.23, 0.20, 0.14, 0.10])
+    branch_indices = np.where(rng.random(n) < 0.78, branch_indices, random_branch_indices)
+    hours = rng.choice(24, size=n, p=_hour_probabilities())
+    category_probabilities = _category_scores(branch_indices, hours, years)
+    category_indices = (rng.random(n)[:, None] <= np.cumsum(category_probabilities, axis=1)).argmax(axis=1)
+
+    product_indices = np.empty(n, dtype=np.int32)
+    category_values = np.array(CATEGORY_ORDER, dtype=object)
+    for category_index, category in enumerate(CATEGORY_ORDER):
+        row_mask = category_indices == category_index
+        available = np.flatnonzero(products["category"].to_numpy() == category)
+        product_weights = products.iloc[available]["unit_price"].to_numpy(dtype=float) ** -0.35
+        product_weights /= product_weights.sum()
+        product_indices[row_mask] = rng.choice(available, size=int(row_mask.sum()), p=product_weights)
+
+    product_rows = products.iloc[product_indices].reset_index(drop=True)
+    branch_basket_factor = np.array([0.90, 1.25, 1.10, 1.35, 0.85])[branch_indices]
+    tier_basket_factor = customer_rows["membership_tier"].map({"Bronze": 0.95, "Silver": 1.05, "Gold": 1.20, "Platinum": 1.35}).to_numpy()
+    category_trend = np.ones(n)
+    category_trend[(years == 2025) & (category_values[category_indices] == "Fresh Produce")] = 1.15
+    category_trend[(years == 2025) & (category_values[category_indices] == "Frozen Foods")] = 0.95
+    category_trend[(years == 2025) & (category_values[category_indices] == "Health & Wellness")] = 1.22
+    quantity = np.maximum(1, np.rint((rng.poisson(1.0 + branch_basket_factor * tier_basket_factor, n) + 1) * np.sqrt(season_factors) * np.where(years == 2025, 1.08, 1.0) * category_trend * rng.uniform(0.86, 1.14, n))).astype(np.int64)
+    quantity = np.minimum(quantity, 18)
+
+    promotion = rng.random(n) < 0.24
+    inflation = np.where(years == 2025, 1.03, 1.0)
+    seasonal_price = 1.0 + (season_factors - 1.0) * 0.04
+    unit_price = product_rows["unit_price"].to_numpy(dtype=float) * inflation * seasonal_price * rng.uniform(0.97, 1.03, n)
+    unit_price *= np.where(promotion, rng.uniform(0.80, 0.95, n), 1.0)
+    unit_price = np.round(unit_price, 2)
+    unit_cost = product_rows["unit_cost"].to_numpy(dtype=float)
+    total_amount = np.round(unit_price * quantity, 2)
+    profit = np.round((unit_price - unit_cost) * quantity, 2)
+
+    payment = customer_rows["preferred_payment"].to_numpy(dtype=object).copy()
+    replace_payment = rng.random(n) >= 0.80
+    payment[replace_payment] = rng.choice(PAYMENT_METHODS, size=int(replace_payment.sum()), p=PAYMENT_PROBABILITIES)
+    transaction_ids = np.char.add("TXN-", np.char.zfill(np.arange(1, n + 1).astype(str), 8)).astype(object)
+    minutes = rng.integers(0, 60, n)
+    seconds = rng.integers(0, 60, n)
+    datetime_values = date_series + pd.to_timedelta(hours, unit="h") + pd.to_timedelta(minutes, unit="m") + pd.to_timedelta(seconds, unit="s")
+
+    sales = pd.DataFrame({
+        "transaction_id": transaction_ids,
+        "datetime": datetime_values.strftime("%Y-%m-%d %H:%M:%S"),
+        "date": datetime_values.strftime("%Y-%m-%d"),
+        "time": datetime_values.strftime("%H:%M:%S"),
+        "customer_id": customer_rows["customer_id"].to_numpy(),
+        "product_id": product_rows["product_id"].to_numpy(),
+        "product_name": product_rows["name"].to_numpy(),
+        "category": product_rows["category"].to_numpy(),
+        "subcategory": product_rows["subcategory"].to_numpy(),
+        "quantity": quantity,
+        "unit_price": unit_price,
+        "unit_cost": unit_cost,
+        "total_amount": total_amount,
+        "profit": profit,
+        "payment_method": payment,
+        "branch": np.array(BRANCHES, dtype=object)[branch_indices],
+        "cashier_id": np.char.add("CASH-", np.char.zfill(rng.integers(1, 81, n).astype(str), 3)),
+        "is_return": np.zeros(n, dtype=bool),
+        "is_online_order": rng.random(n) < 0.12,
+        "promotion_applied": promotion,
+        "membership_tier": customer_rows["membership_tier"].to_numpy(),
+        "day_of_week": datetime_values.day_name().to_numpy(),
+        "hour_of_day": hours,
+    })
+
+    # Inject disjoint, labelled-by-behaviour anomalies.  The rows remain in
+    # the main CSV so the audit can discover them without a second sidecar.
+    order = rng.permutation(n)
+    cursor = 0
+
+    def take(count: int) -> np.ndarray:
+        nonlocal cursor
+        selected = order[cursor:cursor + min(count, n - cursor)]
+        cursor += len(selected)
+        return selected
+
+    bulk_rows = take(50)
+    return_rows = take(30)
+    price_rows = take(20)
+    zero_rows = take(40)
+    duplicate_rows = take(30)
+    suspicious_rows = take(30)
+    sales.loc[bulk_rows, "quantity"] = rng.integers(51, 121, len(bulk_rows))
+    sales.loc[return_rows, "quantity"] = -rng.integers(1, 4, len(return_rows))
+    sales.loc[return_rows, "is_return"] = True
+    sales.loc[price_rows, "unit_price"] = np.round(sales.loc[price_rows, "unit_price"].to_numpy() * 10.0, 2)
+    sales.loc[zero_rows, "total_amount"] = 0.0
+    sales.loc[zero_rows, "profit"] = 0.0
+    if len(duplicate_rows):
+        source_rows = np.arange(len(duplicate_rows), dtype=int)
+        sales.loc[duplicate_rows, "transaction_id"] = sales.loc[source_rows, "transaction_id"].to_numpy()
+    suspicious_minutes = np.char.zfill(rng.integers(0, 60, len(suspicious_rows)).astype(str), 2)
+    suspicious_seconds = np.char.zfill(rng.integers(0, 60, len(suspicious_rows)).astype(str), 2)
+    suspicious_times = np.char.add("03:", np.char.add(suspicious_minutes, np.char.add(":", suspicious_seconds)))
+    suspicious_dates = sales.loc[suspicious_rows, "date"].to_numpy(dtype=str)
+    suspicious_stamps = np.char.add(suspicious_dates, np.char.add(" ", suspicious_times))
+    sales.loc[suspicious_rows, "datetime"] = suspicious_stamps
+    sales.loc[suspicious_rows, "time"] = suspicious_times
+    sales.loc[suspicious_rows, "hour_of_day"] = 3
+    sales.loc[suspicious_rows, "day_of_week"] = pd.to_datetime(suspicious_dates).day_name().to_numpy()
+
+    # Recalculate all derived money fields after bulk, return, and price-error edits.
+    sales["total_amount"] = np.round(sales["unit_price"] * sales["quantity"], 2)
+    sales.loc[zero_rows, "total_amount"] = 0.0
+    sales["profit"] = np.round((sales["unit_price"] - sales["unit_cost"]) * sales["quantity"], 2)
+    sales.loc[zero_rows, "profit"] = 0.0
+    logger.info("Generated {:,} transaction rows; injected 50 bulk, 30 returns, 20 price, 40 void, 30 duplicate-ID, and 30 03:00 anomalies.", len(sales))
+    return sales
+
+
+def generate_all(seed: int = 42, n_transactions: int = 750_000) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Generate and save products, customers, and sales CSVs."""
     config.ensure_directories()
-    logger.info("=== Data generation started ===")
-
-    sales = generate_sales_data(n_records or config.NUM_RECORDS)
-    products = generate_products_data(200)
-    customers = generate_customers_data(sales, n=10000)
-
-    sales.to_csv(config.SALES_DATA_FILE, index=False)
-    logger.info("Saved sales -> {}", config.SALES_DATA_FILE)
+    products = generate_products(seed=seed)
+    customers = generate_customers(seed=seed)
+    sales = generate_transactions(products, customers, n_transactions=n_transactions, seed=seed)
     products.to_csv(config.PRODUCTS_DATA_FILE, index=False)
-    logger.info("Saved products -> {}", config.PRODUCTS_DATA_FILE)
     customers.to_csv(config.CUSTOMERS_DATA_FILE, index=False)
-    logger.info("Saved customers -> {}", config.CUSTOMERS_DATA_FILE)
-
-    load_to_database(sales, products, customers)
-
-    logger.info(
-        "=== Data generation complete: {:,} sales / {} products / {:,} customers ===",
-        len(sales), len(products), len(customers),
-    )
+    sales.to_csv(config.SALES_DATA_FILE, index=False)
+    print(f"Generated {len(products):,} products -> {config.PRODUCTS_DATA_FILE}")
+    print(f"Generated {len(customers):,} customers -> {config.CUSTOMERS_DATA_FILE}")
+    print(f"Generated {len(sales):,} transactions -> {config.SALES_DATA_FILE}")
+    print(f"Revenue: ${sales['total_amount'].sum():,.2f} | Average line: ${sales['total_amount'].mean():,.2f}")
+    print("Categories:", sales["category"].nunique(), "| Branches:", sales["branch"].nunique(), "| Payment methods:", sales["payment_method"].nunique())
     return sales, products, customers
 
 

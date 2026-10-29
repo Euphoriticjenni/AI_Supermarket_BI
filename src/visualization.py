@@ -1,3 +1,6 @@
+# NOTE: All image exports use matplotlib savefig().
+# Kaleido is intentionally not used due to Chromium compatibility issues.
+
 """Chart factory for the AI_Supermarket_BI project.
 
 Every function takes a (processed) sales DataFrame and returns a ready-to-
@@ -535,18 +538,14 @@ def get_kpi_summary(df: pd.DataFrame) -> Dict:
 
 
 # ---------------------------------------------------------------------------
-# Static image export (matplotlib only — kaleido is banned project-wide)
+# Static image export (matplotlib only)
 # ---------------------------------------------------------------------------
-# NOTE: kaleido / plotly .to_image() is deliberately NOT used anywhere in
-# this project: its bundled Chromium hangs on some Windows hosts. All
-# static PNG export goes through matplotlib (Agg backend) instead.
 
 
 def render_trend_image_matplotlib(df: pd.DataFrame, width: int = 900, height: int = 420) -> Optional[bytes]:
-    """Render the daily-sales trend chart with matplotlib (no kaleido needed).
+    """Render the daily-sales trend chart with matplotlib.
 
-    Fallback used by the PDF report when kaleido is unavailable. Uses the
-    Agg backend, so it works fully headless.
+    Uses the Agg backend, so it works fully headless.
 
     Returns
     -------
