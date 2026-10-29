@@ -1,5 +1,5 @@
 """
-NexusBI — Project Audit Script
+Lucciola — Project Audit Script
 Validates project completeness, code quality, and deployment readiness.
 
 Usage:
@@ -412,7 +412,7 @@ def check_forecasting_engine() -> bool:
 
 def main() -> int:
     print()
-    header("🛒 NexusBI — Project Audit Report")
+    header("🛒 Lucciola — Project Audit Report")
     print(f"  📅 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"  📂 {ROOT}")
     print("=" * 65)

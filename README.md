@@ -1,4 +1,4 @@
-# 🛒 AI-Powered Supermarket Analytics & BI System
+# 🛒 Lucciola — AI-Powered Supermarket Analytics & BI System
 
 ![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11-blue)
 ![License](https://img.shields.io/badge/License-MIT-green.svg)

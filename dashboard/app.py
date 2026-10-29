@@ -1,4 +1,4 @@
-"""NexusBI Overview dashboard."""
+"""Lucciola Overview dashboard."""
 from __future__ import annotations
 
 import plotly.express as px
@@ -7,16 +7,18 @@ import streamlit as st
 
 from dashboard import theme
 
-st.set_page_config(page_title="NexusBI", page_icon="◆", layout="wide")
+st.set_page_config(page_title="Lucciola", page_icon="◆", layout="wide")
 theme.inject_theme()
 theme.render_sidebar_nav("Overview")
 theme.render_topbar(["Overview"])
 st.title("Overview")
 st.caption("A current view of revenue, traffic, customers, and basket performance.")
 
+
 @st.cache_data(show_spinner="Loading overview")
 def load_overview_data():
     return theme.load_data()
+
 
 df = load_overview_data()
 if df.empty:
@@ -25,8 +27,16 @@ if df.empty:
     st.plotly_chart(go.Figure(), use_container_width=True)
     st.plotly_chart(go.Figure(), use_container_width=True)
     st.dataframe(df, use_container_width=True)
-    theme.footer("NexusBI v2.1.0")
+    theme.footer("Lucciola v2.1.0")
     st.stop()
+# Validate required columns
+_required = ['transaction_id', 'date', 'branch', 'category', 'payment_method', 'quantity', 'total_amount', 'customer_id', 'datetime', 'hour_of_day']
+_missing = [c for c in _required if c not in df.columns]
+if _missing:
+    theme.render_empty_state(f"Data is missing required columns: {', '.join(_missing)}. Re-run the data pipeline.")
+    st.stop()
+
+
 
 left, right = st.columns([3, 1])
 with left:
@@ -35,6 +45,10 @@ with right:
     branch = st.selectbox("Branch", ["All"] + sorted(df["branch"].dropna().unique().tolist()))
 if branch != "All":
     filtered = filtered[filtered["branch"] == branch]
+if filtered.empty:
+    theme.render_empty_state("No data matches the selected filters. Try broadening the date range or branch filter.")
+    st.stop()
+
 
 revenue = float(filtered["total_amount"].sum())
 transactions = int(filtered["transaction_id"].nunique())
@@ -42,6 +56,7 @@ avg_basket = revenue / transactions if transactions else 0.0
 customers = int(filtered["customer_id"].nunique())
 daily = filtered.groupby("date", as_index=False).agg(Revenue=("total_amount", "sum"), Transactions=("transaction_id", "nunique"))
 trend = daily["Revenue"].tail(14).tolist()
+
 
 cols = st.columns(4)
 for col, label, value, delta, spark in [
@@ -56,6 +71,7 @@ for col, label, value, delta, spark in [
         st.markdown(theme.sparkline_svg(spark), unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
+
 st.markdown('<div class="nx-section">Revenue and mix</div>', unsafe_allow_html=True)
 st.markdown('<div class="nx-section-sub">Daily performance and category contribution for the selected window.</div>', unsafe_allow_html=True)
 left, right = st.columns([3, 2])
@@ -69,6 +85,7 @@ with right:
     fig = px.bar(category, x="total_amount", y="category", orientation="h", title="Revenue by category", labels={"total_amount": "Revenue", "category": ""})
     theme.show_chart(fig, 350)
 
+
 left, right = st.columns(2)
 with left:
     hourly = filtered.groupby("hour_of_day", as_index=False)["total_amount"].sum()
@@ -77,12 +94,13 @@ with left:
 with right:
     payment = filtered["payment_method"].value_counts().reset_index()
     payment.columns = ["payment_method", "transactions"]
-    fig = px.pie(payment, names="payment_method", values="transactions", hole=.55, title="Payment mix")
+    fig = px.pie(payment, names="payment_method", values="transactions", hole=0.55, title="Payment mix")
     theme.show_chart(fig, 300)
+
 
 st.markdown('<div class="nx-section">Recent transactions</div>', unsafe_allow_html=True)
 recent = filtered.sort_values("datetime", ascending=False).head(20).copy()
 recent["total_amount"] = recent["total_amount"].map(theme.format_currency)
 recent["datetime"] = recent["datetime"].dt.strftime("%Y-%m-%d %H:%M")
 st.dataframe(recent[["datetime", "transaction_id", "category", "branch", "payment_method", "quantity", "total_amount"]], use_container_width=True, hide_index=True)
-theme.footer("NexusBI v2.1.0")
+theme.footer("Lucciola v2.1.0")

@@ -1,4 +1,4 @@
-"""NexusBI Customer Analytics."""
+"""Lucciola Customer Analytics."""
 from __future__ import annotations
 
 import numpy as np
@@ -8,18 +8,21 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from dashboard import theme
+
 from src.forecasting import DemandForecaster
 
-st.set_page_config(page_title="NexusBI · Customers", page_icon="◆", layout="wide")
+st.set_page_config(page_title="Lucciola", page_icon="◆", layout="wide")
 theme.inject_theme()
 theme.render_sidebar_nav("Customers")
 theme.render_topbar(["Analytics", "Customers"])
 st.title("Customer Analytics")
 st.caption("Understand customer value, retention, and the segments behind revenue.")
 
+
 @st.cache_data(show_spinner="Loading customer analytics")
 def load_customer_data():
     return theme.load_data()
+
 
 df = load_customer_data()
 if df.empty:
@@ -29,14 +32,34 @@ if df.empty:
     st.plotly_chart(go.Figure(), use_container_width=True)
     st.dataframe(df, use_container_width=True)
     st.stop()
+# Validate required columns
+_required = ['customer_id', 'date', 'transaction_id', 'total_amount']
+_missing = [c for c in _required if c not in df.columns]
+if _missing:
+    theme.render_empty_state(f"Data is missing required columns: {', '.join(_missing)}. Re-run the data pipeline.")
+    st.stop()
+
 
 snapshot = df["date"].max()
-rfm = df.groupby("customer_id").agg(LastPurchase=("date", "max"), Frequency=("transaction_id", "nunique"), Monetary=("total_amount", "sum")).reset_index()
+rfm = df.groupby("customer_id").agg(
+    LastPurchase=("date", "max"),
+    Frequency=("transaction_id", "nunique"),
+    Monetary=("total_amount", "sum"),
+).reset_index()
 rfm["Recency"] = (snapshot - rfm["LastPurchase"]).dt.days
 for source, target in [("Recency", "R"), ("Frequency", "F"), ("Monetary", "M")]:
     ranks = rfm[source].rank(method="first", pct=True)
     rfm[target] = np.ceil(ranks * 5).clip(1, 5).astype(int)
-rfm["segment"] = np.select([(rfm.R >= 4) & (rfm.F >= 4) & (rfm.M >= 4), (rfm.R >= 3) & (rfm.F >= 3), (rfm.R <= 2) & (rfm.F >= 3), (rfm.R <= 2) & (rfm.F <= 2)], ["Champions", "Loyal", "At-Risk", "Lost"], default="Potential")
+rfm["segment"] = np.select(
+    [
+        (rfm.R >= 4) & (rfm.F >= 4) & (rfm.M >= 4),
+        (rfm.R >= 3) & (rfm.F >= 3),
+        (rfm.R <= 2) & (rfm.F >= 3),
+        (rfm.R <= 2) & (rfm.F <= 2),
+    ],
+    ["Champions", "Loyal", "At-Risk", "Lost"],
+    default="Potential",
+)
 rfm["ltv"] = (rfm["Monetary"] / rfm["Frequency"].clip(lower=1) * rfm["Frequency"] * 1.5).round(2)
 
 new_month = snapshot.to_period("M")
@@ -44,7 +67,12 @@ new_customers = int((rfm["LastPurchase"].dt.to_period("M") == new_month).sum())
 repeat_rate = float((rfm["Frequency"] > 1).mean() * 100)
 avg_ltv = float(rfm["ltv"].mean())
 cols = st.columns(4)
-for col, label, value in [(cols[0], "Total customers", theme.format_number(len(rfm))), (cols[1], "New this month", theme.format_number(new_customers)), (cols[2], "Repeat rate", theme.format_percent(repeat_rate)), (cols[3], "Avg LTV", theme.format_currency(avg_ltv))]:
+for col, label, value in [
+    (cols[0], "Total customers", theme.format_number(len(rfm))),
+    (cols[1], "New this month", theme.format_number(new_customers)),
+    (cols[2], "Repeat rate", theme.format_percent(repeat_rate)),
+    (cols[3], "Avg LTV", theme.format_currency(avg_ltv)),
+]:
     with col:
         st.metric(label, value)
 
@@ -53,7 +81,7 @@ with segment_tab:
     counts = rfm["segment"].value_counts().rename_axis("segment").reset_index(name="customers")
     left, right = st.columns(2)
     with left:
-        fig = px.pie(counts, names="segment", values="customers", hole=.55, title="Customer segment mix")
+        fig = px.pie(counts, names="segment", values="customers", hole=0.55, title="Customer segment mix")
         theme.show_chart(fig, 340)
     with right:
         fig = px.scatter(rfm, x="Frequency", y="Monetary", color="segment", size="ltv", hover_name="customer_id", title="Frequency and monetary value", labels={"Monetary": "Spend"})
@@ -83,10 +111,13 @@ with top_tab:
     if len(daily) >= 30:
         model = DemandForecaster(periods=30).fit(daily, date_col="date", value_col="customers")
         pred = model.predict(30)
-        fig = go.Figure([go.Scatter(x=daily["date"], y=daily["customers"], name="Actual", line=dict(color=theme.ACCENT)), go.Scatter(x=pred["ds"], y=pred["yhat"], name="Forecast", line=dict(color=theme.SUCCESS, dash="dash"))])
+        fig = go.Figure([
+            go.Scatter(x=daily["date"], y=daily["customers"], name="Actual", line=dict(color=theme.ACCENT)),
+            go.Scatter(x=pred["ds"], y=pred["yhat"], name="Forecast", line=dict(color=theme.SUCCESS, dash="dash")),
+        ])
     else:
         fig = px.line(daily, x="date", y="customers", title="Customer growth")
     theme.show_chart(fig, 340)
     st.dataframe(df.sort_values("datetime", ascending=False).head(30), use_container_width=True, hide_index=True)
 
-theme.footer("NexusBI v2.1.0")
+theme.footer("Lucciola v2.1.0")

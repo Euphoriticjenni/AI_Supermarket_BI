@@ -1,4 +1,4 @@
-"""NexusBI Sales Analytics."""
+"""Lucciola Sales Analytics."""
 from __future__ import annotations
 
 import plotly.express as px
@@ -6,18 +6,21 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from dashboard import theme
+
 from src.forecasting import DemandForecaster
 
-st.set_page_config(page_title="NexusBI · Sales", page_icon="◆", layout="wide")
+st.set_page_config(page_title="Lucciola", page_icon="◆", layout="wide")
 theme.inject_theme()
 theme.render_sidebar_nav("Sales")
 theme.render_topbar(["Analytics", "Sales"])
 st.title("Sales Analytics")
 st.caption("Explore commercial performance by time, branch, category, and payment behavior.")
 
+
 @st.cache_data(show_spinner="Loading sales analytics")
 def load_sales_data():
     return theme.load_data()
+
 
 df = load_sales_data()
 if df.empty:
@@ -27,6 +30,13 @@ if df.empty:
     st.plotly_chart(go.Figure(), use_container_width=True)
     st.dataframe(df, use_container_width=True)
     st.stop()
+# Validate required columns
+_required = ['transaction_id', 'date', 'branch', 'category', 'payment_method', 'total_amount', 'profit', 'quantity', 'product_id', 'product_name']
+_missing = [c for c in _required if c not in df.columns]
+if _missing:
+    theme.render_empty_state(f"Data is missing required columns: {', '.join(_missing)}. Re-run the data pipeline.")
+    st.stop()
+
 
 c1, c2, c3, c4 = st.columns(4)
 with c1:
@@ -37,16 +47,27 @@ with c3:
     payment = st.selectbox("Payment", ["All"] + sorted(df["payment_method"].unique()))
 with c4:
     filtered = theme.date_filter(df)
-if branch != "All": filtered = filtered[filtered["branch"] == branch]
-if category != "All": filtered = filtered[filtered["category"] == category]
-if payment != "All": filtered = filtered[filtered["payment_method"] == payment]
+if branch != "All":
+    filtered = filtered[filtered["branch"] == branch]
+if category != "All":
+    filtered = filtered[filtered["category"] == category]
+if payment != "All":
+    filtered = filtered[filtered["payment_method"] == payment]
+if filtered.empty:
+    theme.render_empty_state("No data matches the selected filters. Try broadening the date range or filter selections.")
+    st.stop()
 
 revenue = float(filtered["total_amount"].sum())
 orders = int(filtered["transaction_id"].nunique())
 aov = revenue / orders if orders else 0
 profit = float(filtered["profit"].sum())
 cols = st.columns(4)
-for col, label, value in [(cols[0], "Revenue", theme.format_currency(revenue)), (cols[1], "Transactions", theme.format_number(orders)), (cols[2], "Avg basket", theme.format_currency(aov)), (cols[3], "Profit", theme.format_currency(profit))]:
+for col, label, value in [
+    (cols[0], "Revenue", theme.format_currency(revenue)),
+    (cols[1], "Transactions", theme.format_number(orders)),
+    (cols[2], "Avg basket", theme.format_currency(aov)),
+    (cols[3], "Profit", theme.format_currency(profit)),
+]:
     with col:
         st.metric(label, value)
 
@@ -87,4 +108,4 @@ with distribution_tab:
 
 st.markdown('<div class="nx-section">Transaction detail</div>', unsafe_allow_html=True)
 st.dataframe(filtered.sort_values("datetime", ascending=False).head(50), use_container_width=True, hide_index=True)
-theme.footer("NexusBI v2.1.0")
+theme.footer("Lucciola v2.1.0")

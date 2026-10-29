@@ -1,4 +1,4 @@
-"""NexusBI - Prophet demand forecasting engine.
+"""Lucciola - Prophet demand forecasting engine.
 
 The module provides revenue projections, category-level forecasts, anomaly
 detection, seasonal components, and a deterministic exponential-moving-

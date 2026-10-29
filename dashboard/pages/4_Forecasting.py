@@ -1,4 +1,4 @@
-"""NexusBI premium demand forecasting page."""
+"""Lucciola premium demand forecasting page."""
 from __future__ import annotations
 
 import pandas as pd
@@ -6,14 +6,16 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from dashboard import theme
+
 from src.forecasting import DemandForecaster, generate_forecast_insights
 
-st.set_page_config(page_title="NexusBI · Forecasting", page_icon="◆", layout="wide")
+st.set_page_config(page_title="Lucciola", page_icon="◆", layout="wide")
 theme.inject_theme()
 theme.render_sidebar_nav("Forecasting")
 theme.render_topbar(["Planning", "Demand Forecasting"])
 st.title("Demand Forecasting")
 st.caption("Prophet-based revenue and demand planning with transparent uncertainty bands.")
+
 
 df = theme.load_data()
 if df.empty:
@@ -23,6 +25,14 @@ if df.empty:
     st.plotly_chart(go.Figure(), use_container_width=True)
     st.dataframe(df, use_container_width=True)
     st.stop()
+# Validate required columns
+_required = ['date', 'total_amount', 'category']
+_missing = [c for c in _required if c not in df.columns]
+if _missing:
+    theme.render_empty_state(f"Data is missing required columns: {', '.join(_missing)}. Re-run the data pipeline.")
+    st.stop()
+
+
 
 @st.cache_data(show_spinner="Fitting demand model")
 def fit_model(data: pd.DataFrame, horizon: int, category: str) -> tuple[pd.DataFrame, dict, pd.DataFrame, dict]:
@@ -30,6 +40,7 @@ def fit_model(data: pd.DataFrame, horizon: int, category: str) -> tuple[pd.DataF
     daily = subset.groupby("date", as_index=False)["total_amount"].sum()
     model = DemandForecaster(periods=horizon).fit(daily, date_col="date", value_col="total_amount")
     return model.predict(horizon), model.get_forecast_summary(), model.get_anomaly_dates(), model.get_components()
+
 
 controls = st.columns([1, 1, 1, 1])
 with controls[0]:
@@ -44,18 +55,30 @@ with controls[3]:
 if retrain:
     fit_model.clear()
 
+
 forecast, summary, anomalies, components = fit_model(df, horizon, category)
 subset = df if category == "All categories" else df[df["category"] == category]
 history = subset.groupby("date", as_index=False)["total_amount"].sum().rename(columns={"total_amount": "Revenue"})
 if granularity == "Weekly":
     history = history.set_index("date").resample("W")["Revenue"].sum().reset_index()
 
-st.markdown(f'<div class="nx-panel"><span class="nx-badge nx-badge-success">Trained</span> &nbsp; {len(history):,} data points &nbsp; · &nbsp; Backend: {summary.get("backend", "Prophet")} &nbsp; · &nbsp; MAPE: {summary.get("mape", float("nan")):.1f}% &nbsp; · &nbsp; Last trained: {pd.Timestamp.now():%Y-%m-%d %H:%M}</div>', unsafe_allow_html=True)
+
+st.markdown(
+    f'<div class="nx-panel"><span class="nx-badge nx-badge-success">Trained</span> &nbsp; {len(history):,} data points &nbsp; · &nbsp; Backend: {summary.get("backend", "Prophet")} &nbsp; · &nbsp; MAPE: {summary.get("mape", float("nan")):.1f}% &nbsp; · &nbsp; Last trained: {pd.Timestamp.now():%Y-%m-%d %H:%M}</div>',
+    unsafe_allow_html=True,
+)
+
 
 cols = st.columns(4)
-for col, label, value in [(cols[0], "Projected revenue", theme.format_currency(summary.get(f"next_{min(horizon, 30)}d", summary.get("next_30d")))), (cols[1], "Next 7 days", theme.format_currency(summary.get("next_7d"))), (cols[2], "Trend", str(summary.get("trend_direction", "stable")).title()), (cols[3], "Confidence width", theme.format_currency(summary.get("confidence_width")))]:
+for col, label, value in [
+    (cols[0], "Projected revenue", theme.format_currency(summary.get(f"next_{min(horizon, 30)}d", summary.get("next_30d")))),
+    (cols[1], "Next 7 days", theme.format_currency(summary.get("next_7d"))),
+    (cols[2], "Trend", str(summary.get("trend_direction", "stable")).title()),
+    (cols[3], "Confidence width", theme.format_currency(summary.get("confidence_width"))),
+]:
     with col:
         st.metric(label, value)
+
 
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=history["date"], y=history["Revenue"], name="Historical", line=dict(color=theme.ACCENT, width=2)))
@@ -67,6 +90,7 @@ fig.add_shape(type="line", x0=last_day, x1=last_day, y0=0, y1=1, yref="paper", l
 fig.add_annotation(x=last_day, y=1, yref="paper", text="today", showarrow=False, font=dict(color=theme.TEXT_MUTED))
 fig.update_layout(title="Historical revenue and forward forecast", hovermode="x unified")
 theme.show_chart(fig, 500)
+
 
 st.markdown('<div class="nx-section">Model components</div>', unsafe_allow_html=True)
 left, right = st.columns(2)
@@ -81,6 +105,7 @@ with right:
     fig.update_layout(title="Weekly seasonality")
     theme.show_chart(fig, 300)
 
+
 st.markdown('<div class="nx-section">Anomaly detection</div>', unsafe_allow_html=True)
 if anomalies.empty:
     st.info("No historical dates are outside the model confidence band.")
@@ -88,11 +113,17 @@ else:
     anomaly_view = anomalies.copy()
     anomaly_view["deviation"] = (anomaly_view["actual"] - (anomaly_view["yhat_lower"] + anomaly_view["yhat_upper"]) / 2)
     anomaly_view["type"] = anomaly_view["anomaly_direction"].map({"above_expected": "Above expected", "below_expected": "Below expected"})
-    st.dataframe(anomaly_view[["ds", "actual", "yhat_lower", "yhat_upper", "deviation", "type"]].sort_values("ds", ascending=False), use_container_width=True, hide_index=True)
+    st.dataframe(
+        anomaly_view[["ds", "actual", "yhat_lower", "yhat_upper", "deviation", "type"]].sort_values("ds", ascending=False),
+        use_container_width=True,
+        hide_index=True,
+    )
+
 
 insights = generate_forecast_insights({"summary": summary, "anomalies": anomalies})
 with st.expander("Planning notes", expanded=True):
     for insight in insights[:5]:
         st.write(insight)
 
-theme.footer("Forecasts use Prophet trend and seasonality with a 90% uncertainty interval. Estimates are planning aids, not commitments. · NexusBI v2.1.0")
+
+theme.footer("Forecasts use Prophet trend and seasonality with a 90% uncertainty interval. Estimates are planning aids, not commitments. · Lucciola v2.1.0")
