@@ -16,8 +16,10 @@ product catalogue carries ``Category`` — they share the same 6 values, so
 demand statistics are computed per product line and inherited by every
 product in that line.
 """
+from __future__ import annotations
+
 import math
-from typing import Dict
+from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -41,6 +43,44 @@ ACTION_ORDER = ["🔴 URGENT REORDER", "🟡 REORDER SOON", "🟢 ADEQUATE", "�
 
 
 # ---------------------------------------------------------------------------
+# Column resolution (supports both legacy and new schemas)
+# ---------------------------------------------------------------------------
+def _resolve_column(frame: pd.DataFrame, requested: str, aliases: tuple[str, ...]) -> Optional[str]:
+    """Resolve a requested column against common legacy and new aliases."""
+    if requested in frame.columns:
+        return requested
+    lower = {str(column).lower(): str(column) for column in frame.columns}
+    for candidate in (requested, *aliases):
+        if candidate.lower() in lower:
+            return lower[candidate.lower()]
+    return None
+
+
+def _resolve_sales_columns(df: pd.DataFrame) -> dict[str, str]:
+    """Map canonical sales column names to actual DataFrame columns."""
+    return {
+        "date": _resolve_column(df, "Date", ("date", "datetime", "ds")),
+        "product_line": _resolve_column(df, "Product_Line", ("category", "Product_Line", "product_line")),
+        "quantity": _resolve_column(df, "Quantity", ("quantity", "Quantity")),
+        "total": _resolve_column(df, "Total", ("total_amount", "Total", "revenue", "Revenue", "y")),
+    }
+
+
+def _resolve_product_columns(df: pd.DataFrame) -> dict[str, str]:
+    """Map canonical product column names to actual DataFrame columns."""
+    return {
+        "product_id": _resolve_column(df, "Product_ID", ("product_id", "Product_ID")),
+        "product_name": _resolve_column(df, "Product_Name", ("name", "Product_Name", "product_name")),
+        "category": _resolve_column(df, "Category", ("category", "Category")),
+        "supplier": _resolve_column(df, "Supplier", ("supplier", "Supplier")),
+        "cost": _resolve_column(df, "Cost", ("unit_cost", "Cost", "unit_cost")),
+        "selling_price": _resolve_column(df, "Selling_Price", ("unit_price", "Selling_Price", "unit_price")),
+        "stock": _resolve_column(df, "Stock", ("stock", "Stock")),
+        "reorder_level": _resolve_column(df, "Reorder_Level", ("reorder_level", "Reorder_Level")),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 def _line_demand_stats(products_df: pd.DataFrame, sales_df: pd.DataFrame) -> pd.DataFrame:
@@ -50,16 +90,31 @@ def _line_demand_stats(products_df: pd.DataFrame, sales_df: pd.DataFrame) -> pd.
     and the standard deviation of daily demand (on a complete-day basis),
     then left-joins them onto the product catalogue via Category.
     """
-    sales = sales_df.copy()
-    sales["Date"] = pd.to_datetime(sales["Date"])
+    sales_cols = _resolve_sales_columns(sales_df)
+    product_cols = _resolve_product_columns(products_df)
 
-    n_days = max(sales["Date"].dt.normalize().nunique(), 1)
-    line_totals = sales.groupby("Product_Line", observed=True)["Quantity"].sum()
+    date_col = sales_cols["date"]
+    product_line_col = sales_cols["product_line"]
+    quantity_col = sales_cols["quantity"]
+    category_col = product_cols["category"]
+
+    if not all([date_col, product_line_col, quantity_col, category_col]):
+        logger.warning("Missing required columns for demand stats; returning products with zeros.")
+        result = products_df.copy()
+        result["Avg_Daily_Demand"] = 0.0
+        result["Demand_Std"] = 0.0
+        return result
+
+    sales = sales_df.copy()
+    sales[date_col] = pd.to_datetime(sales[date_col], errors="coerce")
+
+    n_days = max(sales[date_col].dt.normalize().nunique(), 1)
+    line_totals = sales.groupby(product_line_col, observed=True)[quantity_col].sum()
 
     daily_line = sales.groupby(
-        [sales["Date"].dt.normalize(), "Product_Line"], observed=True
-    )["Quantity"].sum()
-    line_std = daily_line.groupby("Product_Line").std(ddof=1).fillna(0.0)
+        [sales[date_col].dt.normalize(), product_line_col], observed=True
+    )[quantity_col].sum()
+    line_std = daily_line.groupby(product_line_col).std(ddof=1).fillna(0.0)
 
     stats = pd.DataFrame({
         "Product_Line": line_totals.index,
@@ -69,7 +124,7 @@ def _line_demand_stats(products_df: pd.DataFrame, sales_df: pd.DataFrame) -> pd.
     })
 
     products = products_df.copy()
-    merged = products.merge(stats, how="left", left_on="Category", right_on="Product_Line")
+    merged = products.merge(stats, how="left", left_on=category_col, right_on="Product_Line")
     merged["Avg_Daily_Demand"] = merged["Avg_Daily_Demand"].fillna(0.0)
     merged["Demand_Std"] = merged["Demand_Std"].fillna(0.0)
     return merged.drop(columns=["Product_Line"], errors="ignore")
@@ -96,18 +151,32 @@ def analyze_stock(products_df: pd.DataFrame, sales_df: pd.DataFrame) -> Dict:
         sorted by Stock ascending (worst first).
     """
     logger.info("Stock analysis for {} products ...", len(products_df))
+    product_cols = _resolve_product_columns(products_df)
     merged = _line_demand_stats(products_df, sales_df)
 
+    stock_col = product_cols["stock"]
+    reorder_col = product_cols["reorder_level"]
+    product_id_col = product_cols["product_id"]
+    product_name_col = product_cols["product_name"]
+    category_col = product_cols["category"]
+
+    if not all([stock_col, reorder_col, product_id_col, product_name_col, category_col]):
+        logger.warning("Missing required product columns for stock analysis.")
+        return {
+            "summary": {"stockouts": 0, "below_reorder": 0, "overstock": 0, "adequate": 0, "total_products": len(products_df)},
+            "details": pd.DataFrame(),
+        }
+
     merged["Days_Of_Stock_Left"] = (
-        merged["Stock"] / merged["Avg_Daily_Demand"].clip(lower=0.01)
+        merged[stock_col] / merged["Avg_Daily_Demand"].clip(lower=0.01)
     ).round(1)
 
     def _classify(row) -> str:
-        if row["Stock"] == 0:
+        if row[stock_col] == 0:
             return "stockout"
-        if row["Stock"] < row["Reorder_Level"]:
+        if row[stock_col] < row[reorder_col]:
             return "below_reorder"
-        if row["Avg_Daily_Demand"] > 0 and row["Stock"] > 3 * row["Avg_Daily_Demand"] * 30:
+        if row["Avg_Daily_Demand"] > 0 and row[stock_col] > 3 * row["Avg_Daily_Demand"] * 30:
             return "overstock"
         return "adequate"
 
@@ -121,9 +190,14 @@ def analyze_stock(products_df: pd.DataFrame, sales_df: pd.DataFrame) -> Dict:
         "total_products": int(len(merged)),
     }
     details = merged[[
+        product_id_col, product_name_col, category_col, stock_col, reorder_col,
+        "Avg_Daily_Demand", "Days_Of_Stock_Left", "Stock_Status",
+    ]].sort_values(stock_col).reset_index(drop=True)
+    # Rename for consistent output
+    details.columns = [
         "Product_ID", "Product_Name", "Category", "Stock", "Reorder_Level",
         "Avg_Daily_Demand", "Days_Of_Stock_Left", "Stock_Status",
-    ]].sort_values("Stock").reset_index(drop=True)
+    ]
 
     logger.info("Stock summary: {}", summary)
     return {"summary": summary, "details": details}
@@ -162,7 +236,16 @@ def calculate_safety_stock(
         "Safety stock calc: {} products, service level {} (Z={}), lead {} days.",
         len(products_df), service_level, z, lead_time,
     )
+    product_cols = _resolve_product_columns(products_df)
     merged = _line_demand_stats(products_df, sales_df)
+
+    stock_col = product_cols["stock"]
+    product_id_col = product_cols["product_id"]
+    product_name_col = product_cols["product_name"]
+
+    if not all([stock_col, product_id_col, product_name_col]):
+        logger.warning("Missing required product columns for safety stock.")
+        return pd.DataFrame()
 
     merged["Safety_Stock"] = np.ceil(
         z * merged["Demand_Std"] * math.sqrt(lead_time)
@@ -172,9 +255,9 @@ def calculate_safety_stock(
     ).astype(int)
 
     result = merged[[
-        "Product_ID", "Product_Name", "Stock", "Avg_Daily_Demand",
+        product_id_col, product_name_col, stock_col, "Avg_Daily_Demand",
         "Demand_Std", "Safety_Stock", "Reorder_Point",
-    ]].rename(columns={"Stock": "Current_Stock"}).reset_index(drop=True)
+    ]].rename(columns={stock_col: "Current_Stock"}).reset_index(drop=True)
     logger.info(
         "Safety stock complete: median reorder point = {}, {} products below it.",
         int(result["Reorder_Point"].median()),
@@ -231,17 +314,31 @@ def abc_analysis(sales_df: pd.DataFrame) -> Dict:
         ``{"abc_df": DataFrame, "plot": plotly figure}`` — the figure shows
         revenue bars with a cumulative-share line on a secondary axis.
     """
+    sales_cols = _resolve_sales_columns(sales_df)
+    product_line_col = sales_cols["product_line"]
+    total_col = sales_cols["total"]
+
+    if not product_line_col or not total_col or product_line_col not in sales_df.columns or total_col not in sales_df.columns:
+        logger.warning("Missing required columns for ABC analysis; returning empty result.")
+        empty_df = pd.DataFrame(columns=["Product_Line", "Revenue", "Revenue_Pct", "Cumulative_Pct", "ABC_Class"])
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+        fig.update_layout(
+            title="ABC Analysis — Product Lines by Revenue",
+            template=config.PLOTLY_TEMPLATE, height=config.CHART_HEIGHT,
+        )
+        return {"abc_df": empty_df, "plot": fig}
+
     revenue = (
-        sales_df.groupby("Product_Line", observed=True)["Total"].sum()
+        sales_df.groupby(product_line_col, observed=True)[total_col].sum()
         .sort_values(ascending=False).reset_index()
     )
-    revenue["Revenue_Pct"] = (revenue["Total"] / revenue["Total"].sum() * 100).round(2)
+    revenue["Revenue_Pct"] = (revenue[total_col] / revenue[total_col].sum() * 100).round(2)
     revenue["Cumulative_Pct"] = revenue["Revenue_Pct"].cumsum().round(2)
     revenue["ABC_Class"] = np.where(
         revenue["Cumulative_Pct"] <= 80.0, "A",
         np.where(revenue["Cumulative_Pct"] <= 95.0, "B", "C"),
     )
-    revenue = revenue.rename(columns={"Total": "Revenue"})
+    revenue = revenue.rename(columns={total_col: "Revenue", product_line_col: "Product_Line"})
 
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(

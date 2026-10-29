@@ -1,4 +1,4 @@
-"""Shared data access for the NexusBI dashboard.
+"""Shared data access for the Lucciola dashboard.
 
 Single home for cached loaders, the shared sidebar filter, and cached
 wrappers around the expensive analytics / forecasting engines — so no page

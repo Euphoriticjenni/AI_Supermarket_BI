@@ -1,371 +1,498 @@
-# 🛒 AI-Powered Supermarket Analytics & BI System
+# 🪲✨ Lucciola — Illuminate your data.
 
-![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11-blue)
-![License](https://img.shields.io/badge/License-MIT-green.svg)
-![CI](https://img.shields.io/badge/CI-GitHub_Actions-success)
-![Streamlit](https://img.shields.io/badge/Streamlit-1.29-red)
+> **Supermarket Business Intelligence, beautifully executed.** Turn half a million raw transactions into executive-ready insights, live forecasts, and natural-language answers — in under five minutes.
 
-A complete, end-to-end Business Intelligence system for supermarket retail
-operations — from synthetic data generation to an interactive dashboard, an
-offline natural-language assistant, and automated executive PDF reports.
+**Lucciola** *(Italian for "firefly")* is a production-grade **Python / Streamlit / Plotly / Prophet** BI platform for supermarket retail. It synthesizes, cleans, enriches, analyzes, forecasts, and presents retail operations end-to-end — from synthetic CSVs to a dark-themed interactive dashboard and one-click PDF briefings.
+
+![Dashboard](docs/screenshots/overview.png)
+
+[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11-blue?logo=python)](https://www.python.org/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.29.0-red?logo=streamlit)](https://streamlit.io/)
+[![Prophet](https://img.shields.io/badge/Prophet-1.5.0-purple?logo=meta)](https://facebook.github.io/prophet/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Build](https://img.shields.io/badge/Build-Passing-success?logo=githubactions)](.github/workflows/ci.yml)
+[![Coverage](https://img.shields.io/badge/Coverage-60%20tests-green)](tests/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-blue?logo=docker)](Dockerfile)
+[![Audit](https://img.shields.io/badge/Audit-100%25%20ship--ready-gold)](#testing--cicd)
 
 ---
 
-## 📋 Overview
+## 😤 The Problem
 
-**AI_Supermarket_BI** is a Python-based Business Intelligence platform that
-simulates and analyses the full lifecycle of supermarket retail data. The
-pipeline starts by synthesising a realistic two-year transaction history —
-**500,000 sales lines** across 3 branches (Yangon, Mandalay, Naypyitaw),
-6 product lines and 3 payment methods, plus a 10,000-customer base and a
-200-product catalogue — then validates every record with schema contracts,
-cleans it (duplicates, nulls, outliers, dtypes) and enriches it into a
-**37-column feature table** (temporal, financial, rolling, lag and basket
-features) that lands in both Parquet and a SQLite warehouse.
+Supermarkets generate **hundreds of thousands of transactions** across branches, categories, and payment rails every year. Managers drown in CSVs — and Excel can't spot a seasonal stockout, a churn signal, or a demand surge until it's already lost revenue.
 
-On top of that foundation sits a lightweight analytics layer built entirely
-on **pandas / NumPy / Plotly / SQL**: rule-based **RFM customer segmentation**
-with CLV scoring, daily/weekly/monthly **trend analysis** with moving
-averages and a seasonal-adjusted 30-day revenue projection, and an
-**inventory engine** that computes safety stock, reorder points and ABC
-classification. Twelve focused Python modules in `src/` keep generation,
-validation, analytics, visualisation and reporting cleanly separated, and a
-16-function chart factory guarantees a consistent look across every view.
+> **Lucciola solves it:** one command creates realistic data, validates and enriches it, and drops it into a live dashboard, a Prophet forecast, and a boardroom PDF. From raw to insight in minutes, not days.
 
-Everything is surfaced through a **6-view Streamlit dashboard** (overview,
-sales, customers, inventory, trends, assistant), an **offline AI assistant**
-that turns plain-English questions into SQL and answers with text, tables and
-charts — no API key, no LLM required — and an **automated multi-page
-executive PDF report** rendered with matplotlib + fpdf2. The whole system is
-covered by a pytest suite, shipped as a Docker image, and linted/tested on
-GitHub Actions (Python 3.10 & 3.11).
+---
 
-## 🎯 Problem Statement
+## 💡 What Lucciola Does
 
-Supermarkets generate a flood of point-of-sale data, but the people who run
-them rarely have direct access to it:
-
-- **Managers** answer basic questions ("Which branch made more money last
-  quarter?") by exporting spreadsheets or waiting on analysts.
-- **Inventory decisions** are guesswork — without demand statistics and
-  reorder points, stores both stock out on best-sellers and overstock the
-  tail.
-- **Customers are invisible** — the business cannot tell its champions from
-  its churned customers without segmentation work.
-- **Commercial BI tools** are expensive, heavyweight, and often require cloud
-  infrastructure and ML platforms that a single analyst cannot maintain.
-
-This project demonstrates that a **complete, self-serve BI stack** —
-dashboard, natural-language querying, segmentation, inventory planning and
-executive reporting — can run **100% offline on one machine**, using nothing
-but deterministic rules, SQL and lightweight statistics. It is fully
-reproducible (seeded, env-configurable) and designed so that the synthetic
-data layer can later be swapped for a real POS feed without touching the
-analytics or presentation layers.
-
-## ✨ Key Features
-
-- 🖥️ **Interactive dashboard** — 6 Streamlit views with shared filters (date range, branch, city, product line), headline KPIs and ~15 Plotly charts
-- 👥 **Customer analytics** — rule-based RFM segmentation (6 segments), deterministic proxy customers, CLV scoring with Low/Medium/High tiers
-- 📈 **Trends & forecasting** — daily/weekly/monthly aggregation, 7/30-day moving averages, year-over-year comparison, seasonal heatmap and a seasonal-adjusted 30-day projection with confidence band
-- 📦 **Inventory management** — safety stock (Z·σ·√L), reorder points, prioritised reorder report with stock-action flags, and ABC product-line classification
-- 🤖 **AI assistant** — offline regex→SQL engine (27 query templates) answering plain-English questions with text, tables and charts; zero API keys
-- 📄 **Automated PDF reports** — multi-page executive report (revenue, profit, branches, product lines, ratings) built with matplotlib + fpdf2 at the click of a button
-- ✅ **Tested** — pytest suite covering preprocessing, analytics, inventory and data validation contracts
-- 🐳 **Dockerised** — one-command build/run with volume-persisted data, database, reports and logs, plus a Streamlit healthcheck
-- 🔄 **CI/CD** — GitHub Actions pipeline linting (flake8) and testing (pytest) on a Python 3.10/3.11 matrix
-- 🅰️ **ABC analysis** — cumulative-revenue classification (A/B/C) shared by the analytics and inventory modules
-
-## 🏗️ Architecture
-
-```
- ┌─────────────────────────────── DATA LAYER ────────────────────────────────┐
- │                                                                           │
- │   src/data_generator ──────► data/augmented/        data/raw/             │
- │   (seeded Faker, 500K rows)   supermarket_sales.csv   (landing zone)      │
- │                               customers.csv                               │
- │                               products.csv                                │
- │                                        │                                  │
- │                                        ▼                                  │
- │   src/data_validation ──► pandera schema contracts (fail fast)            │
- │   src/preprocessing ────► dedupe, nulls, outliers ──► sales_processed     │
- │   src/feature_engineering ► temporal / financial / rolling / lag /        │
- │                              basket features ──► sales_features.parquet   │
- │                                                   (471,588 × 37)          │
- │                                        │                                  │
- │                                        ▼                                  │
- │   SQLite warehouse (database/supermarket.db)  ◄── sales / customers /     │
- │                                                   products tables         │
- └────────────────────────────────┬──────────────────────────────────────────┘
-                                  │
- ┌────────────────────────────────▼──────────── ANALYTICS LAYER ─────────────┐
- │                                                                           │
- │   src/analytics ──── RFM + CLV · product & ABC analysis · trends ·        │
- │                      moving averages · YoY · seasonal projection          │
- │   src/inventory ──── safety stock · reorder points · reorder report ·     │
- │                      ABC classification                                   │
- │   src/visualization  16-function Plotly chart factory (shared palette)    │
- │   src/logger ─────── Loguru structured logging across every module        │
- └────────────────────────────────┬──────────────────────────────────────────┘
-                                  │
- ┌────────────────────────────────▼───────── PRESENTATION LAYER ─────────────┐
- │                                                                           │
- │   Streamlit dashboard (dashboard/)   AI assistant        Report generator │
- │   ├─ 🛒 Home (KPIs + charts)         src/ai_assistant    src/               │
- │   ├─ 📊 Sales Analytics              regex → SQL →      report_generator   │
- │   ├─ 👥 Customer Analytics           text / table /     fpdf2 + matplotlib │
- │   ├─ 📦 Inventory                    chart (offline)    → reports/*.pdf    │
- │   ├─ 📈 Trends & Forecasting                                               │
- │   └─ 🤖 AI Assistant                                                       │
- └───────────────────────────────────────────────────────────────────────────┘
-```
-
-## 🛠️ Tech Stack
-
-| Category | Technology | Purpose |
+| | Capability | Detail |
 |---|---|---|
-| Language | Python 3.10 / 3.11 | Core runtime (typed, modular `src/` package) |
-| Data processing | Pandas 2.1 | Aggregations, RFM, trends, inventory maths |
-| Numerics | NumPy 1.26 | Scoring, statistics, OLS trend fitting |
-| Visualisation | Plotly 5.18 | 16-function interactive chart factory |
-| Dashboard | Streamlit 1.29 | 6-view multipage BI application |
-| Database | SQLite + SQLAlchemy 2.0 | Lightweight warehouse the assistant queries |
-| Validation | Pandera 0.18 | Schema contracts on raw/processed data |
-| Synthetic data | Faker 21.0 | Realistic customers, products and transactions |
-| PDF reports | fpdf2 2.7 + Matplotlib 3.8 | Executive report rendering with static PNG charts |
-| Time series | Statsmodels 0.14 | Seasonal decomposition of daily sales |
-| Logging | Loguru 0.7 | Structured, rotating application logs |
-| Config | python-dotenv | `.env`-driven paths, seeds and record counts |
-| Testing | pytest 7.4 | Unit/contract tests for all core modules |
-| Container | Docker + docker-compose | One-command deployment with persisted volumes |
-| CI/CD | GitHub Actions | flake8 + pytest on Python 3.10/3.11 matrix |
-| Database engine | SQLite (file-based) | Zero-admin warehouse for sales/customers/products |
+| 📊 | **Sales Analytics** | Daily / weekly / monthly revenue trends, hourly traffic, payment & branch breakdowns, moving averages |
+| 👥 | **Customer Intelligence** | RFM scoring, rule-based segments (Champions · Loyal · At-Risk · Lost), repeat-rate & CLV |
+| 📦 | **Inventory Optimization** | ABC analysis, safety-stock (95% service-level Z=1.65), lead-time reorder alerts |
+| 🔮 | **Demand Forecasting** | Prophet-powered with 90% confidence bands, anomaly flags & trend / weekly seasonality decomposition |
+| 🤖 | **AI Business Assistant** | Natural-language data queries — offline, rule-based, grounded in SQLite (27 query templates) |
+| 📄 | **Automated Reports** | One-click executive PDF via `fpdf2` + matplotlib charts |
+| 🐳 | **One-Command Deploy** | `docker-compose up --build` → http://localhost:8501 |
+| ✅ | **CI/CD Pipeline** | GitHub Actions on every push (Python 3.10 & 3.11, flake8 + pytest) |
+
+---
+
+## 🏗 Architecture
+
+```mermaid
+flowchart LR
+    A[Raw CSV\nsupermarket_sales.csv] --> B[Validation\nPandera]
+    B --> C[Cleaning\nsrc/preprocessing.py]
+    C --> D[Feature Engineering\nsrc/feature_engineering.py\n37 columns]
+    D --> E{Analytics + Forecasting}
+    E --> F[RFM / ABC / Trends\nsrc/analytics.py\nsrc/inventory.py]
+    E --> G[Prophet Engine\nsrc/forecasting.py\nDemandForecaster]
+    F --> H[Dashboard\nStreamlit + Plotly\n6 pages]
+    G --> H
+    H --> I[PDF Reports\nsrc/report_generator.py]
+    D --> J[(SQLite\nsupermarket.db)]
+    J --> H
+    J --> K[(Parquet\nsales_processed\nsales_features)]
+
+    subgraph Data
+      L[data/augmented\n750K tx + 600 products + 15K customers]
+      M[data/processed\nsales_processed.parquet\nsales_features.parquet]
+    end
+    L --> A
+    C --> M
+    D --> M
+```
+
+> **Data flow in one line:** `generate_all()` creates `data/augmented/*.csv` → `run_preprocessing_pipeline()` cleans to `sales_processed.parquet` → `run_feature_engineering()` enriches to `sales_features.parquet` + `database/supermarket.db` → every page reads from `theme.load_data()`.
+
+---
+
+## 🧰 Tech Stack
+
+| Category | Technology | Version | Purpose |
+|---|---|---|---|
+| **Core** | Python | 3.10+ | Runtime (see `setup.py` `python_requires`) |
+| | pandas | 2.1.4 | DataFrames everywhere |
+| | numpy | 1.26.2 | Vectorized generation & analytics |
+| | pyarrow | 14.0.2 | Parquet I/O |
+| **Data** | pandera | 0.18.0 | Schema validation |
+| | faker | 21.0.0 | Synthetic customers & products |
+| | openpyxl | 3.1.2 | Excel support |
+| **Viz** | plotly | 5.18.0 | Interactive charts (all dashboard pages) |
+| | matplotlib | 3.8.2 | Static PDF-report charts |
+| | statsmodels | 0.14.1 | Seasonal decomposition |
+| **Dashboard** | streamlit | 1.29.0 | App shell, `dashboard/app.py` |
+| | kaleido | 0.2.1 | Image export (CI note: disabled, report uses matplotlib) |
+| **Forecasting** | prophet | 1.5.0 | `DemandForecaster` / `CategoryForecaster` |
+| **Database** | sqlalchemy | 2.0.23 | SQLite ORM |
+| | SQLite | via `database/schema.sql` | `sales` · `products` · `customers` |
+| **DevOps** | Docker | `python:3.10-slim` | `Dockerfile` + `docker-compose.yml` |
+| | GitHub Actions | `ci.yml` | Lint + test matrix `3.10` / `3.11` |
+| **Testing** | pytest | 7.4.3 | 7 test files, 60+ tests |
+| **Logging** | loguru | 0.7.2 | Structured logging |
+| | python-dotenv | 1.0.0 | `.env` config |
+
+<details>
+<summary>📦 Full requirements.txt</summary>
+
+```txt
+pandas==2.1.4
+numpy==1.26.2
+pyarrow==14.0.2
+matplotlib==3.8.2
+plotly==5.18.0
+scikit-learn==1.3.2
+mlxtend==0.23.0
+xgboost==2.0.3
+prophet==1.5.0
+streamlit==1.29.0
+sqlalchemy==2.0.23
+pandera==0.18.0
+multimethod==1.9.1
+openpyxl==3.1.2
+joblib==1.3.2
+faker==21.0.0
+shap==0.44.0
+pytest==7.4.3
+loguru==0.7.2
+fpdf2==2.7.6
+python-dotenv==1.0.0
+requests==2.31.0
+kaleido==0.2.1
+statsmodels==0.14.1
+```
+
+> Real versions pulled straight from `requirements.txt`. `setup.py` is `ai_supermarket_bi==1.0.0`, `license=MIT`, `python_requires>=3.10`.
+
+</details>
+
+---
 
 ## 📁 Project Structure
 
 ```
 AI_Supermarket_BI/
-├── dashboard/                     # Streamlit multipage application
-│   ├── app.py                     #   🛒 Home — KPIs + overview charts
+├── dashboard/
+│   ├── app.py                 # Overview — revenue, traffic, customers, basket
+│   ├── theme.py               # Lucciola Enterprise Dark design system (tokens, CSS, chart theme)
+│   ├── data.py                # Shared data layer
 │   └── pages/
-│       ├── 1_📊_Sales_Analytics.py    # period aggregation, geography, products
-│       ├── 2_👥_Customer_Analytics.py # RFM segments, CLV, demographics
-│       ├── 3_📦_Inventory.py          # safety stock, reorder report, ABC
-│       ├── 4_📈_Trends.py             # projection, moving averages, YoY
-│       └── 5_🤖_AI_Assistant.py       # offline Q&A + executive PDF report
-├── src/                           # 12 core Python modules
-│   ├── __init__.py                #   package documentation
-│   ├── config.py                  #   all paths, seeds, business constants
-│   ├── logger.py                  #   Loguru setup
-│   ├── data_generator.py          #   seeded synthetic data → CSV + SQLite
-│   ├── data_validation.py         #   Pandera schema contracts
-│   ├── preprocessing.py           #   cleaning pipeline → sales_processed
-│   ├── feature_engineering.py     #   37-column enriched feature table
-│   ├── analytics.py               #   RFM/CLV, product & ABC, trends
-│   ├── inventory.py               #   safety stock, reorder report, ABC
-│   ├── visualization.py           #   16-function Plotly chart factory
-│   ├── ai_assistant.py            #   offline regex→SQL business assistant
-│   └── report_generator.py        #   executive PDF (fpdf2 + matplotlib)
-├── data/
-│   ├── raw/                       # landing zone (kept empty in repo)
-│   ├── augmented/                 # generated datasets
-│   │   ├── supermarket_sales.csv  #   500,000 transaction lines
-│   │   ├── customers.csv          #   10,000 customers
-│   │   └── products.csv           #   200 products (Stock, Reorder_Level)
-│   └── processed/                 # pipeline artefacts (generated)
-│       ├── sales_processed.csv/.parquet
-│       ├── sales_features.parquet #   471,588 rows × 37 columns
-│       ├── abc_analysis.csv
-│       ├── reorder_report.csv
-│       ├── outliers_removed.csv
-│       └── analytics_summary.parquet
+│       ├── 1_Sales.py         # Trend / Breakdown / Distribution + Prophet toggle
+│       ├── 2_Customers.py     # RFM segments, cohorts, retention heatmap
+│       ├── 3_Inventory.py     # ABC, safety stock, reorder report
+│       ├── 4_Forecasting.py   # Prophet forecast + decomposition + anomalies
+│       └── 5_AI_Assistant.py  # BusinessAssistant chat + executive PDF trigger
+├── src/
+│   ├── config.py              # NUM_RECORDS, BRANCHES, TAX_RATE, paths, holidays
+│   ├── data_generator.py      # generate_all() → 750K tx, 600 products, 15K customers
+│   ├── data_validation.py     # Pandera schemas
+│   ├── preprocessing.py       # run_preprocessing_pipeline()
+│   ├── feature_engineering.py # run_feature_engineering() → 37-col enriched parquet
+│   ├── analytics.py           # rfm_analysis(), product/trend_analysis(), run_full_analytics()
+│   ├── inventory.py           # analyze_stock(), abc_analysis(), calculate_safety_stock()
+│   ├── forecasting.py         # DemandForecaster, CategoryForecaster (Prophet)
+│   ├── ai_assistant.py        # BusinessAssistant — 27 offline query templates
+│   ├── report_generator.py    # generate_executive_report() → PDF via fpdf2
+│   ├── visualization.py       # Shared Plotly/matplotlib helpers
+│   └── logger.py              # loguru setup
 ├── database/
-│   ├── schema.sql                 # warehouse DDL
-│   └── supermarket.db             # SQLite warehouse (generated)
-├── tests/                         # pytest suites
+│   └── schema.sql             # sales / products / customers (SQLite) + 4 indexes
+├── data/
+│   ├── augmented/             # supermarket_sales.csv + products.csv + customers.csv
+│   ├── processed/             # sales_processed.parquet + sales_features.parquet
+│   └── raw/                   # (optional inbound)
+├── tests/                     # 7 suites, 60+ tests
+├── notebooks/01_EDA.ipynb     # Exploratory analysis
+├── .github/workflows/ci.yml   # lint + pytest (3.10 / 3.11)
+├── .env.example               # Env template (5 vars)
+├── Dockerfile                 # python:3.10-slim → streamlit run :8501
+├── docker-compose.yml         # supermarket-bi : 8501:8501 + persisted volumes
+├── Makefile                   # 14 targets (install → all)
+├── setup.py                   # ai_supermarket_bi 1.0.0, MIT
+├── audit.py                   # 9-point 100% ship-ready check
+└── README.md
+```
+
+<details>
+<summary>🌲 Full tree (including generated artefacts)</summary>
+
+```bash
+.
+├── InstallationLog.txt
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+├── setup.py
+├── Makefile
+├── audit.py
+├── .env.example
+├── .streamlit/
+├── .github/workflows/ci.yml
+├── dashboard/
+│   ├── app.py
+│   ├── theme.py
+│   ├── data.py
+│   └── pages/1_Sales.py … 5_AI_Assistant.py
+├── src/  (13 Python files)
+├── database/schema.sql
+├── data/augmented/
+├── data/processed/
+├── tests/
 │   ├── test_preprocessing.py
+│   ├── test_data_validation.py
 │   ├── test_analytics.py
 │   ├── test_inventory.py
-│   └── test_data_validation.py
-├── notebooks/
-│   └── 01_EDA.ipynb               # exploratory analysis
-├── reports/                       # generated executive PDFs
-├── logs/                          # Loguru application logs
-├── .env.example                   # optional configuration template
-├── .github/workflows/ci.yml       # lint + test pipeline (3.10 / 3.11)
-├── Dockerfile                     # Streamlit runtime image (port 8501)
-├── docker-compose.yml             # volumes for data/db/reports/logs
-├── Makefile                       # make generate-data | dashboard | test | …
-├── requirements.txt               # pinned dependencies
-├── setup.py                       # pip install -e . support (MIT)
-└── audit.py                       # project self-audit script
+│   ├── test_forecasting.py
+│   ├── test_dashboard_helpers.py
+│   └── test_integration_fix.py
+├── notebooks/01_EDA.ipynb
+├── scripts/audit_data.py  run_pipeline.py
+└── reports/
 ```
+
+</details>
+
+---
 
 ## 🚀 Quick Start
 
-**Prerequisites:** Python 3.10+ and Make (or run the underlying commands manually — every `make` target is one line you can copy from the `Makefile`).
+### Prerequisites
+
+* **Python 3.10+** (3.10 or 3.11 — CI tests both)
+* `pip`, `git` — Docker optional
+
+### 1 — Local (copy-paste)
 
 ```bash
-# 1. Clone
-git clone https://github.com/your-org/AI_Supermarket_BI.git
+git clone https://github.com/Euphoriticjenni/AI_Supermarket_BI.git
 cd AI_Supermarket_BI
 
-# 2. Install dependencies (optionally in a virtualenv)
+python -m venv .venv
+# Windows: .venv\Scripts\activate
+source .venv/bin/activate
+
 pip install -r requirements.txt
-
-# 3. Build the data pipeline
-make generate-data      # seed 500K transactions + customers + products → CSV & SQLite
-make preprocess         # validate & clean → data/processed/sales_processed
-make features           # enrich to 37 columns → data/processed/sales_features.parquet
-make analytics          # RFM + trends + product/ABC summary artefacts
-
-# 4. Launch the dashboard
-make dashboard          # → http://localhost:8501
+pip install prophet          # already in requirements, but safe to force
 ```
 
-Optional extras:
+### 2 — Generate data (≈ 750K rows, ~30s)
+
+```python
+python -c "from src.data_generator import generate_all; generate_all()"
+```
+
+> Creates `data/augmented/supermarket_sales.csv` (150 MB) + `products.csv` + `customers.csv` and seeds `database/supermarket.db`. Respects `NUM_RECORDS` from `src/config.py` (default `500_000`, generator default `750_000`).
+
+### 3 — Full pipeline (optional — dashboard reads augmented directly)
 
 ```bash
-make test               # pytest suite
-make lint               # flake8 (max-line-length=120)
-make report             # generate an executive PDF without the dashboard
-make status             # inspect what the pipeline has produced
+python -c "from src.preprocessing import run_preprocessing_pipeline; run_preprocessing_pipeline()"
+python -c "import pandas as pd; from src.feature_engineering import run_feature_engineering; df = pd.read_parquet('data/processed/sales_processed.parquet'); run_feature_engineering(df)"
+python -c "import pandas as pd; from src.analytics import run_full_analytics; df = pd.read_parquet('data/processed/sales_features.parquet'); run_full_analytics(df)"
 ```
 
-**Docker:**
+### 4 — Launch the dashboard
 
 ```bash
-make docker-build       # build the supermarket-bi image
-make docker-run         # start it detached → http://localhost:8501
-make docker-stop        # tear down
+streamlit run dashboard/app.py
 ```
 
-Volumes mount `data/`, `database/`, `reports/` and `logs/`, so container
-rebuilds keep their state.
+Expected:
 
-**Configuration (optional):** copy `.env.example` to `.env` to tune
-`NUM_RECORDS`, `RANDOM_SEED`, `DATABASE_PATH`, `LOG_LEVEL` and `REPORT_PATH`.
-Everything works fully offline; an `OPENAI_API_KEY` is never required.
+```txt
+  You can now view your Streamlit app in your browser.
 
-## 📊 Dashboard Pages
-
-| Page | What it shows |
-|---|---|
-| 🛒 **Home** | 8 headline KPIs (revenue, profit, orders, AOV, customers, rating, best branch & product line) plus monthly revenue, product-line treemap, daily trend, branch comparison and payment/customer-mix charts. Every chart reacts to the sidebar filters. |
-| 📊 **Sales Analytics** | Daily/Weekly/Monthly revenue aggregation selector, branch & city performance, product-line revenue and profit, hourly and weekday patterns, payment & customer-type mix, year-over-year comparison, and the OLS revenue trend line. |
-| 👥 **Customer Analytics** | Rule-based RFM segmentation with segment sizes and profiles (avg R/F/M scores, monetary, CLV), CLV distribution and tiers, Top-20 customers by CLV, gender & age demographics, and the Member-vs-Normal transaction breakdown. |
-| 📦 **Inventory** | Stock-position metrics, per-product safety stock and reorder points (service level 90/95/99% and supplier lead time adjustable in the sidebar), the prioritised reorder report with action flags, and ABC classification of product lines. |
-| 📈 **Trends & Forecasting** | Seasonal-adjusted 30-day projection with confidence band, latest MoM/YoY growth, daily revenue with 7/30-day moving averages, monthly year-over-year lines, a Month×Year seasonal heatmap, weekly revenue and the MoM growth table. |
-| 🤖 **AI Assistant** | Offline business Q&A (regex→SQL over the warehouse) with answers, tables and charts, an executive summary with key insights, and a one-click executive PDF report generator with in-browser download. |
-
-All pages share a consistent design: `@st.cache_data` loaders with
-parquet-first/CSV-fallback, `layout="wide"`, a common Set2 Plotly palette,
-and empty-state warnings when filters exclude everything.
-
-## 🤖 AI Assistant Examples
-
-The assistant matches questions against 27 ordered regex templates, runs the
-SQL on the SQLite warehouse, and answers with text, a table and — when it
-helps — a chart. Real output from the current dataset:
-
-**Q: "What was total revenue by branch?"**
-
-```sql
-SELECT Branch, City, ROUND(SUM(Total),2) as Revenue,
-       ROUND(SUM(Gross_Income),2) as Profit,
-       COUNT(DISTINCT Invoice_ID) as Orders
-FROM sales GROUP BY Branch, City ORDER BY Revenue DESC
+  Local URL: http://localhost:8501
 ```
 
-> Here are the top 3 of 3 results:
-> - Branch: A, City: Yangon, Revenue: 34,902,087.62, Profit: 1,662,025.03, Orders: 166,919
-> - Branch: B, City: Mandalay, Revenue: 34,829,508.18, Profit: 1,658,569.91, Orders: 166,620
-> - Branch: C, City: Naypyitaw, Revenue: 34,643,402.62, Profit: 1,649,708.40, Orders: 166,461
->
-> A leads with 34,902,087.62 (258,685.00 more than C).
+### 🐳 Docker alternative
 
-**Q: "Which products need restocking?"**
-
-```sql
-SELECT Product_ID, Product_Name, Stock, Reorder_Level,
-       CASE WHEN Stock = 0 THEN 'STOCKOUT'
-            WHEN Stock < Reorder_Level THEN 'LOW'
-            ELSE 'OK' END as Status
-FROM products ORDER BY Stock ASC LIMIT 20
+```bash
+docker-compose up --build
+# → http://localhost:8501  (container: supermarket-bi, healthcheck: /_stcore/health)
 ```
 
-> Here are the top 3 of 20 results:
-> - Product ID: PROD-0002, Product Name: Herbal Shampoo, Stock: 0, Reorder Level: 47, Status: STOCKOUT
-> - Product ID: PROD-0004, Product Name: Vitamin C Serum, Stock: 0, Reorder Level: 20, Status: STOCKOUT
-> - Product ID: PROD-0077, Product Name: Storage Box, Stock: 0, Reorder Level: 35, Status: STOCKOUT
+`docker-compose.yml` mounts `./data`, `./database`, `./reports`, `./logs` so rebuilds keep state and exposes `DATABASE_PATH=/app/database/supermarket.db`.
 
-**Q: "What is the basket size (AOV)?"**
+---
 
-```sql
-SELECT ROUND(AVG(Total),2) as Avg_Order_Value, ROUND(MIN(Total),2) as Min_Order,
-       ROUND(MAX(Total),2) as Max_Order,
-       ROUND(SUM(Total)/COUNT(DISTINCT Invoice_ID),2) as Revenue_Per_Order
-FROM sales
-```
+## 🖥 Dashboard Pages
 
-> Here's the summary: Avg Order Value = 208.75, Min Order = 10.50,
-> Max Order = 46,579.05, Revenue Per Order = 208.75.
-
-The assistant never raises: unmatched or failing questions return a helpful
-message instead of an error, and it works identically offline.
-
-## 📈 Analytics Capabilities
-
-| Capability | Method | Where |
+| Page | Key Visuals | What It Shows |
 |---|---|---|
-| RFM segmentation (6 segments) | Rule-based scoring on Recency / Frequency / Monetary (1–5 scales) | `src/analytics.py` → Customers page |
-| Customer lifetime value | AOV × frequency × annualised recency factor, tiered Low/Medium/High | `src/analytics.py` → Customers page |
-| Daily / weekly / monthly trends | `groupby` aggregation with ISO weeks and Year-Month keys | `src/analytics.py` → Trends page |
-| Moving averages | 7-day and 30-day rolling means on daily revenue | `src/analytics.py` → Trends page |
-| Year-over-year comparison | Month×Year pivot and overlaid monthly lines | `src/analytics.py` → Trends page |
-| 30-day revenue projection | Seasonal-adjusted moving average with ±1σ band (√30 scaling) | `src/analytics.py` → Trends page |
-| Seasonal decomposition | Additive `seasonal_decompose` (period = 30 days) | `src/visualization.py` |
-| ABC classification | Cumulative revenue share (A ≤ 80%, B ≤ 95%, C remainder) | `src/inventory.py` / `src/analytics.py` |
-| Safety stock & reorder points | Z·σ·√L with service levels 90/95/99% and lead-time buffer | `src/inventory.py` → Inventory page |
-| Reorder prioritisation | Action flags (urgent → overstock) sorted by headroom | `src/inventory.py` → Inventory page |
-| Correlation analysis | Numeric-feature correlation matrix (price, quantity, revenue, rating…) | `src/visualization.py` |
-| Text-to-SQL Q&A | 27 ordered regex→SQL templates over the SQLite warehouse | `src/ai_assistant.py` → Assistant page |
-| Executive reporting | Matplotlib charts + fpdf2 multi-page PDF layout | `src/report_generator.py` |
+| **Overview** `dashboard/app.py` | ![Overview](docs/screenshots/overview.png) | 4 KPI cards + revenue sparkline · *Revenue and mix* (weekly-rolled trend + category bar) · hourly traffic · payment mix · recent 20 transactions |
+| **Sales** `1_Sales.py` | ![Sales](docs/screenshots/1_sales_analytics.png) | Trend (Revenue + 7d/30d MAs + optional 30-day Prophet forecast) · category stack by month · product treemap · histogram + box distribution |
+| **Customers** `2_Customers.py` | ![Customers](docs/screenshots/2_customer_analytics.png) | RFM segments · segment pie + frequency/monetary scatter · cohort retention heatmap · customer growth + forecast |
+| **Inventory** `3_Inventory.py` | ![Inventory](docs/screenshots/3_inventory.png) | ABC class bar + stock-status pie · safety-stock table (Z=1.65) · reorder report with reorder points |
+| **Forecasting** `4_Forecasting.py` | ![Forecasting](docs/screenshots/4_trends.png) | Horizon slider (7–180d) · historical + Prophet forecast with 90% band · trend & weekly-seasonality decomposition · anomaly table · planning notes |
+| **AI Assistant** `5_AI_Assistant.py` | ![AI Assistant](docs/screenshots/5_ai_assistant.png) | Natural-language chat, context charts (revenue + payment mix), executive PDF trigger |
+
+> Real screenshots live in `reports/dashboard_screenshots/` (12 images). Placeholders above resolve when you export screenshots to `docs/screenshots/`.
+
+> **Design system:** `dashboard/theme.py` — Enterprise Dark. Tokens: `BG_ROOT #09090B`, `BG_SURFACE #18181B`, `ACCENT #3B82F6`, `SUCCESS #22C55E`, Inter font, Plotly dark template, `COLORWAY` of 8 brand hues, `kpi` / `panel` / `badge` CSS components.
+
+---
+
+## 🔄 Data Pipeline
+
+```bash
+generate_all()  →  run_preprocessing_pipeline()  →  run_feature_engineering()  →  run_full_analytics()
+     │                        │                             │                            │
+     │ 750K tx × 6 lines      │ dedup, nulls,               │ 37 columns:                │ RFM + product + trend
+     │ 10K customers          │ outliers, dtypes,           │ temporal, financial,       │ + inventory + forecast
+     │ 600 products           │ schema (Pandera)            │ rolling, lag, basket       │
+     └─ data/augmented/       └─ sales_processed.parquet   └─ sales_features.parquet    └─ processed/*.csv
+```
+
+| Stage | Entrypoint | Function | Output |
+|---|---|---|---|
+| **Generate** | `src/data_generator.py` | `generate_all(seed=42, n_transactions=750_000)` → `generate_transactions()` + `generate_customers(n=15_000)` + `generate_products(n=600)` + `load_to_database()` | `data/augmented/supermarket_sales.csv` · `products.csv` · `customers.csv` · `database/supermarket.db` |
+| **Preprocess** | `src/preprocessing.py` | `run_preprocessing_pipeline()` | `data/processed/sales_processed.parquet` (also `.csv`) |
+| **Features** | `src/feature_engineering.py` | `run_feature_engineering(df)` | `data/processed/sales_features.parquet` (37 columns) |
+| **Analytics** | `src/analytics.py` | `run_full_analytics(df)` → `rfm_analysis()` + `product_analysis()` + `trend_analysis()` | `customer_segments.csv` · `model_comparison.csv` · `detected_anomalies.csv` |
+| **Inventory** | `src/inventory.py` | `run_inventory_pipeline(products_df, sales_df)` → `analyze_stock()` + `abc_analysis()` + `calculate_safety_stock()` | `abc_analysis.csv` · `reorder_report.csv` |
+| **Audit** | `audit.py` | `python audit.py` (9 checks) | `100% ship-ready` verdict |
+
+**Real scale from `src/config.py`:** Branches `Yangon / Mandalay / Naypyitaw`, product lines *Health & beauty · Electronic accessories · Home & lifestyle · Sports & travel · Food & beverages · Fashion accessories*, payments *Cash / Credit card / Ewallet*, `DATE_START 2022-01-01 → DATE_END 2023-12-31`, `TAX_RATE 5%`, `GROSS_MARGIN_PCT 4.7619`, `ANOMALIES_TO_INJECT 50`.
+
+---
+
+## 🔮 Forecasting Engine
+
+Powered by **Meta Prophet 1.5.0** (`prophet`) with an EMA fallback when the CmdStan backend is unavailable. Every dashboard forecast uses the same code as the programmatic API.
+
+**Classes in `src/forecasting.py`:**
+
+| Class | Key Methods | What It Does |
+|---|---|---|
+| `DemandForecaster(periods=90, …)` | `fit(df)` · `predict(periods)` · `get_forecast_summary()` · `get_anomaly_dates()` · `get_components()` | Daily Prophet model + training `RMSE`/`MAPE` + 90% interval + EMA safety net |
+| `CategoryForecaster` | `fit_all(df)` · `predict_all(periods)` · `get_top_growth_categories(top_n=3)` | One `DemandForecaster` per category (min 60 observed days) |
+
+**Programmatic usage — copy-paste:**
+
+```python
+from src.forecasting import DemandForecaster, CategoryForecaster
+
+# Total revenue (90-day horizon, 90% band)
+fc = DemandForecaster(periods=90, interval_width=0.90)
+fc.fit(df, date_col="date", value_col="total_amount")
+forecast = fc.predict(90)          # ds, yhat, yhat_lower, yhat_upper, trend, weekly, yearly
+summary  = fc.get_forecast_summary()  # next_7d, next_30d, next_90d, trend_direction, confidence_width, mape
+anomalies = fc.get_anomaly_dates()    # historical dates outside the band
+components = fc.get_components()      # trend / weekly / yearly DataFrames
+
+# Per-category
+cf = CategoryForecaster().fit_all(df, category_col="category")
+per_cat = cf.predict_all(periods=30)
+winners = cf.get_top_growth_categories(top_n=3)
+```
+
+**Details:** `changepoint_prior_scale=0.05`, `seasonality_mode=multiplicative`, auto `yearly` (≥365d) + `weekly` (≥14d), `monthly` Fourier (period 30.5, order 5), `fill_missing=True` calendar gap-fill, `generate_forecast_insights()` produces 5–7 plain-English planning notes.
+
+---
+
+## ✅ Testing & CI/CD
+
+```bash
+pytest tests/ -v --tb=short   # matrix: 3.10 × 3.11
+python audit.py                # 9-point ship-ready gate
+flake8 src/ tests/             # MAX_LINE 120, ignores E501/W503
+```
+
+**CI pipeline** (`.github/workflows/ci.yml`) on every `push` to `main`/`develop` and every PR to `main`:
+
+1. `actions/checkout@v4` + `setup-python@v5` (cache `requirements.txt`)
+2. `pip install -r requirements.txt` + `flake8`
+3. `mkdir -p data/raw data/processed …`
+4. `flake8 src/ tests/`
+5. `pytest tests/ -v --tb=short`
+
+**Test suites (7 files, 60+ tests):**
+
+| File | What It Covers |
+|---|---|
+| `test_preprocessing.py` | `remove_duplicates`, `handle_missing_values`, `fix_data_types`, `remove_outliers` |
+| `test_data_validation.py` | Pandera schema contracts |
+| `test_analytics.py` | RFM, product & trend analytics |
+| `test_inventory.py` | ABC, safety-stock, reorder logic |
+| `test_forecasting.py` | `DemandForecaster` fit/predict contracts |
+| `test_dashboard_helpers.py` | `dashboard/theme.py` helpers |
+| `test_integration_fix.py` | End-to-end pipeline fix regressions |
+
+**Audit** (`python audit.py`): Files (36/36) · Code completeness (no TODO/NotImplemented) · Forbidden ML imports (no sklearn/xgboost on dashboard path) · No kaleido · Data-path hygiene · Data & DB state · Pipeline readiness (9 steps) · Dashboard pages (6/6) · Prophet engine → prints `100% COMPLETE & SHIP-READY`.
+
+---
+
+## ⚙️ Makefile Commands
+
+From `Makefile` (`make <target>` at project root):
+
+| Command | What It Does |
+|---|---|
+| `make install` | `pip install -r requirements.txt` + `ensure_directories()` |
+| `make generate-data` | `generate_all()` → 750K synthetic transactions |
+| `make preprocess` | `run_preprocessing_pipeline()` → `sales_processed.parquet` |
+| `make features` | Loads `sales_processed.parquet` → `run_feature_engineering()` |
+| `make analytics` | Loads `sales_features.parquet` → `run_full_analytics()` |
+| `make test` | `pytest tests/ -v --tb=short` |
+| `make lint` | `flake8 src/ tests/ --max-line-length=120` |
+| `make dashboard` | `streamlit run dashboard/app.py --server.port 8501 --server.address 0.0.0.0` |
+| `make docker-build` | `docker-compose build` |
+| `make docker-run` | `docker-compose up -d` → http://localhost:8501 |
+| `make docker-stop` | `docker-compose down` |
+| `make report` | `generate_executive_report()` → `reports/executive_report_*.pdf` |
+| `make status` | `ls -lh data/augmented/ data/processed/ database/ reports/` |
+| `make clean` | Removes `data/processed/*`, `logs/*`, PDFs, caches (keeps `data/augmented/` & DB) |
+| `make all` | `install → generate-data → preprocess → features → analytics → test → dashboard` |
+
+---
+
+## 🔐 Environment Variables
+
+From `.env.example` (all optional — project runs fully offline without `OPENAI_API_KEY`):
+
+| Variable | Default |Description |
+|---|---|---|
+| `OPENAI_API_KEY` | `your_key_here` | LLM key for the AI assistant. Empty → offline rule-based engine (27 templates) |
+| `OPENAI_MODEL` | `gpt-3.5-turbo` | Chat-completions model when `OPENAI_API_KEY` is set |
+| `DATABASE_PATH` | `database/supermarket.db` | SQLite path (relative → anchored to `PROJECT_ROOT`) |
+| `LOG_LEVEL` | `INFO` | `DEBUG \| INFO \| WARNING \| ERROR` (Loguru) |
+| `REPORT_PATH` | `reports/` | Where `generate_executive_report()` writes PDFs |
+
+> Also respected (from `src/config.py`): `RANDOM_SEED=42`, `NUM_RECORDS=500000`, `RAW_DATA_PATH` / `PROCESSED_DATA_PATH` / `AUGMENTED_DATA_PATH`.
+
+---
 
 ## ⚠️ Known Limitations
 
-- **Synthetic data.** All transactions, customers and products are generated
-  (seeded Faker, env-tunable record count). Distributions are realistic but
-  the 50 injected extreme transactions exist specifically to exercise the
-  outlier pipeline — absolute KPI values are not market truths.
-- **No machine learning.** By design, every number comes from deterministic
-  rules and statistics — segmentation, CLV and the 30-day projection are
-  transparent heuristics, not trained models.
-- **SQLite only.** The warehouse is a single-file database: fine for a
-  single-analyst dashboard, but there is no concurrency, user management or
-  network access.
-- **Proxy customers.** The sales table carries no customer key, so RFM/CLV
-  use a deterministic invoice-ID proxy (`crc32`) — "customers" are
-  invoice clusters, not loyalty-card holders.
-- **Single-user dashboard.** Streamlit runs without authentication, HTTPS or
-  row-level security; it is not exposed for multi-user production use as-is.
-- **PDF statics via matplotlib.** Plotly figures are interactive in the
-  browser, but static export deliberately routes through matplotlib because
-  kaleido hangs on some Windows hosts.
+* **Synthetic by design** — 750K rows are statistically plausible (Faker-driven) but won't capture every real-world promotion, weather or supply-chain shock.
+* **Forecast horizon** — accuracy degrades beyond ~90 days; CI widens by design (90% band). Retrain weekly.
+* **Assistant is rule-based** — grounded SQLite queries via 27 templates, no LLM hallucination — but no generative reasoning yet.
+* **SQLite only** — great for single-node demos; PostgreSQL not yet wired (planned).
+* `kaleido` is pinned but not used for PDF export (the report uses `matplotlib`) — the audit explicitly flags stray `to_image()` calls.
 
-## 🔮 Future Enhancements
+---
 
-- 🗄️ Swap SQLite for PostgreSQL / a cloud warehouse behind the same SQL layer
-- 🔐 Add authentication and per-user dashboard scopes for real deployments
-- 🔄 Scheduled pipeline refresh (cron / Airflow) feeding a live POS ingest
-- 🔔 Reorder alerting: threshold emails or Slack notifications from the reorder report
-- 📊 Excel / Google Sheets exports of every dashboard table
-- 🧠 Optional statistical demand forecasting to replace the heuristic projection once real data arrives
-- 🌐 i18n and localised currency formatting for multi-country rollouts
-- ☸️ Kubernetes manifests and horizontal Streamlit scaling behind a gateway
+## 🗺 Roadmap / Future Work
+
+- [ ] K-Means customer clustering
+- [ ] XGBoost demand forecasting
+- [ ] Apriori market basket analysis
+- [ ] Text-to-SQL AI assistant (LLM-powered)
+- [ ] Real-time streaming (Kafka)
+- [ ] PostgreSQL migration
+- [ ] Role-based access control
+- [ ] Cloud deployment (AWS/GCP)
+
+---
+
+## 🤝 Contributing
+
+Fork → branch → commit → PR. Please:
+
+1. Use **type hints** and **docstrings** (the codebase is fully annotated).
+2. Log via `loguru` (`from src.logger import get_logger`), not `print`.
+3. Keep panels/charts on the dark theme (`dashboard/theme.py` `ACCENT #3B82F6` · `BG_ROOT #09090B`).
+4. Run `python audit.py` and `pytest tests/ -v` before pushing — CI will do both.
+
+```bash
+git checkout -b feat/your-idea
+# … make changes …
+python audit.py   # must be 100%
+pytest tests/ -v  # must be green
+git push -u origin feat/your-idea  # open a PR to main
+```
+
+---
 
 ## 📄 License
 
-Released under the **MIT License** — free to use, modify and distribute;
-see the `license="MIT"` declaration in `setup.py` and the standard MIT
-grant terms.
+**MIT** — see `LICENSE` if present. Free to fork, ship, and remix.
+
+---
+
+## 🙏 Credits / Acknowledgments
+
+Built with [Streamlit](https://streamlit.io/) · [Plotly](https://plotly.com/) · [Meta Prophet](https://facebook.github.io/prophet/) · [Pandas](https://pandas.pydata.org/) · [Pandera](https://pandera.readthedocs.io/) — and inspired by real supermarket analytics challenges.
+
+---
+
+## 📬 Contact / Author
+
+| | |
+|---|---|
+| **Project** | [Euphoriticjenni/AI_Supermarket_BI](https://github.com/Euphoriticjenni/AI_Supermarket_BI) |
+| **Maintainer** | AI Supermarket BI Team (`author` in `setup.py`) |
+| **Email** | *add your email here* |
+| **LinkedIn** | *add your LinkedIn here* |
+
+> PRs and ideas welcome — open an issue to start a conversation!
+
+---
+
+<p align="center">
+  <em>Lucciola — illuminate your data. 🪲✨</em>
+</p>

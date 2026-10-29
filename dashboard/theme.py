@@ -1,4 +1,4 @@
-"""NexusBI Enterprise Dark dashboard theme and shared UI helpers."""
+"""Lucciola Enterprise Dark dashboard theme and shared UI helpers."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -28,15 +28,6 @@ DANGER = "#EF4444"
 COLORWAY = ["#3B82F6", "#8B5CF6", "#22C55E", "#EAB308", "#EF4444", "#06B6D4", "#EC4899", "#F97316"]
 FONT = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
 
-_NAV = [
-    ("Overview", "app.py", "Overview"),
-    ("Sales", "pages/1_Sales.py", "Sales"),
-    ("Customers", "pages/2_Customers.py", "Customers"),
-    ("Inventory", "pages/3_Inventory.py", "Inventory"),
-    ("Forecasting", "pages/4_Forecasting.py", "Forecasting"),
-    ("AI Assistant", "pages/5_AI_Assistant.py", "AI Assistant"),
-]
-
 _CSS = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -49,34 +40,30 @@ h1, h2, h3 {{ color: {TEXT_PRIMARY}; font-weight: 600; letter-spacing: -0.025em;
 [data-testid="stHeader"] {{ background: {BG_ROOT}; border-bottom: 1px solid {BORDER}; }}
 [data-testid="stSidebar"] {{ width: 240px; min-width: 240px; background: {BG_ROOT}; border-right: 1px solid {BORDER}; }}
 [data-testid="stSidebar"] .block-container {{ padding: 22px 14px; }}
-[data-testid="stSidebarNav"] {{ display: none; }}
 [data-testid="stSidebar"] a {{ text-decoration: none !important; }}
-[data-testid="stSidebar"] [data-testid="stSidebarNavLink"] {{ border-left:2px solid transparent; border-radius:6px; color:{TEXT_SECONDARY}; margin:2px 0; }}
-[data-testid="stSidebar"] [data-testid="stSidebarNavLink"]:hover {{ background:{BG_ELEVATED}; color:{TEXT_PRIMARY}; }}
-[data-testid="stSidebar"] [data-testid="stSidebarNavLink"][aria-current="page"] {{ background:{BG_ELEVATED}; border-left-color:{ACCENT}; color:{TEXT_PRIMARY}; }}
 .nx-brand {{ display:flex; align-items:center; gap:10px; padding:4px 10px 24px; }}
 .nx-mark {{ display:grid; place-items:center; width:28px; height:28px; border-radius:6px; background:{ACCENT}; color:white; font-weight:700; }}
 .nx-brand-name {{ color:{TEXT_PRIMARY}; font-size:1rem; font-weight:600; letter-spacing:-.02em; }}
 .nx-brand-sub {{ color:{TEXT_MUTED}; font-size:.65rem; letter-spacing:.1em; text-transform:uppercase; margin-top:2px; }}
-.nx-nav-label {{ color:{TEXT_MUTED}; font-size:.68rem; font-weight:600; letter-spacing:.08em; text-transform:uppercase; padding:0 10px 8px; }}
-.nx-profile {{ border-top:1px solid {BORDER}; margin:24px 6px 0; padding:16px 4px 0; }}
-.nx-profile-row {{ display:flex; align-items:center; gap:10px; }}
-.nx-avatar {{ width:30px; height:30px; border-radius:50%; display:grid; place-items:center; background:{BG_ELEVATED}; color:{TEXT_PRIMARY}; font-size:.7rem; font-weight:600; }}
-.nx-profile-name {{ color:{TEXT_PRIMARY}; font-size:.8rem; font-weight:600; }}
-.nx-profile-role {{ color:{TEXT_MUTED}; font-size:.7rem; margin-top:2px; }}
+
 .nx-topbar {{ display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid {BORDER}; padding:0 0 18px; margin-bottom:28px; }}
 .nx-crumb {{ color:{TEXT_MUTED}; font-size:.78rem; }}
 .nx-crumb strong {{ color:{TEXT_SECONDARY}; font-weight:500; }}
-.nx-topbar-meta {{ color:{TEXT_MUTED}; font-size:.75rem; display:flex; align-items:center; gap:12px; }}
+.nx-topbar-meta {{ color:{TEXT_MUTED}; font-size:.75rem; }}
 .nx-page-intro {{ margin-bottom:24px; }}
 .nx-page-intro h1 {{ margin:0; font-size:1.65rem; }}
 .nx-page-intro p {{ color:{TEXT_SECONDARY}; margin:6px 0 0; font-size:.9rem; }}
-.nx-kpi {{ background:{BG_SURFACE}; border:1px solid {BORDER}; border-radius:8px; padding:16px 18px; box-shadow:0 1px 2px rgba(0,0,0,.3); min-height:126px; }}
-.nx-kpi-label {{ color:{TEXT_MUTED}; font-size:.72rem; text-transform:uppercase; letter-spacing:.05em; font-weight:500; }}
-.nx-kpi .stMetric {{ padding:0; }}
-.nx-kpi [data-testid="stMetricValue"] {{ color:{TEXT_PRIMARY}; font-size:1.75rem; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.03em; }}
-.nx-kpi [data-testid="stMetricDelta"] {{ font-size:.75rem; }}
-.nx-kpi svg {{ display:none; }}
+.nx-kpi {{ background:{BG_SURFACE}; border:1px solid {BORDER}; border-radius:8px; padding:16px 18px; box-shadow:0 1px 2px rgba(0,0,0,.3); min-height:132px; display:flex; flex-direction:column; justify-content:space-between; gap:4px; }}
+.nx-kpi-label {{ color:{TEXT_MUTED}; font-size:.68rem; text-transform:uppercase; letter-spacing:.06em; font-weight:600; }}
+.nx-kpi-value {{ color:{TEXT_PRIMARY}; font-size:1.65rem; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.03em; line-height:1.15; margin:4px 0 2px; }}
+.nx-kpi .stMetric {{ padding:0; margin:0; }}
+.nx-kpi [data-testid="stMetric"] {{ gap:0; }}
+.nx-kpi [data-testid="stMetricValue"] {{ color:{TEXT_PRIMARY}; font-size:1.60rem; font-weight:700; font-variant-numeric:tabular-nums; letter-spacing:-.03em; line-height:1.1; }}
+.nx-kpi [data-testid="stMetricLabel"] {{ color:{TEXT_MUTED}; font-size:.68rem; letter-spacing:.05em; }}
+.nx-kpi [data-testid="stMetricDelta"] {{ font-size:.72rem; margin-top:2px; }}
+.nx-kpi svg.nx-spark {{ display:block; margin-top:8px; width:100%; opacity:.85; }}
+.nx-kpi-row {{ display:flex; gap:16px; }}
+.nx-kpi-row > div {{ flex:1; }}
 .nx-section {{ color:{TEXT_PRIMARY}; font-size:1rem; font-weight:600; letter-spacing:-.015em; margin:26px 0 10px; }}
 .nx-section-sub {{ color:{TEXT_SECONDARY}; font-size:.8rem; margin:-5px 0 12px; }}
 .nx-panel {{ background:{BG_SURFACE}; border:1px solid {BORDER}; border-radius:8px; padding:20px; box-shadow:0 1px 2px rgba(0,0,0,.3); }}
@@ -115,30 +102,35 @@ def inject_theme() -> None:
 
 
 def render_sidebar_nav(current_page: str) -> None:
-    st.sidebar.markdown('<div class="nx-brand"><div class="nx-mark">N</div><div><div class="nx-brand-name">NexusBI</div><div class="nx-brand-sub">Retail intelligence</div></div></div>', unsafe_allow_html=True)
-    st.sidebar.markdown('<div class="nx-nav-label">Workspace</div>', unsafe_allow_html=True)
-    for label, path, page_name in _NAV:
-        try:
-            st.sidebar.page_link(path, label=label, icon=None)
-        except Exception:
-            href = "./" if path == "app.py" else f"./{path}"
-            st.sidebar.markdown(f'<a href="{href}" class="nx-nav-item">{label}</a>', unsafe_allow_html=True)
-    st.sidebar.markdown('<div class="nx-profile"><div class="nx-profile-row"><div class="nx-avatar">AM</div><div><div class="nx-profile-name">Alex Morgan</div><div class="nx-profile-role">Analyst · Pro plan</div></div></div></div>', unsafe_allow_html=True)
+    st.sidebar.markdown(
+        '<div class="nx-brand"><div class="nx-mark">N</div><div><div class="nx-brand-name">Lucciola</div><div class="nx-brand-sub">Retail intelligence</div></div></div>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_topbar(breadcrumbs: list[str]) -> None:
     crumb = " / ".join(breadcrumbs)
-    st.markdown(f'<div class="nx-topbar"><div class="nx-crumb">NexusBI <strong>/ {crumb}</strong></div><div class="nx-topbar-meta">{pd.Timestamp.now():%b %d, %Y}<span class="nx-avatar">AM</span></div></div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="nx-topbar"><div class="nx-crumb">Lucciola <strong>/ {crumb}</strong></div><div class="nx-topbar-meta">{pd.Timestamp.now():%b %d, %Y}</div></div>',
+        unsafe_allow_html=True,
+    )
 
 
-def render_kpi_card(label: str, value: str, delta: Optional[float] = None, direction: str = "up", icon: str = "", sparkline_data: Optional[Sequence[float]] = None) -> None:
+def render_kpi_card(
+    label: str,
+    value: str,
+    delta: Optional[float] = None,
+    direction: str = "up",
+    icon: str = "",
+    sparkline_data: Optional[Sequence[float]] = None,
+) -> None:
     delta_value = None if delta is None else f"{delta:+.1f}%"
     with st.container():
         st.markdown(f'<div class="nx-kpi"><div class="nx-kpi-label">{label}</div>', unsafe_allow_html=True)
         st.metric(label="", value=value, delta=delta_value, delta_color="normal" if direction == "up" else "inverse")
         if sparkline_data is not None:
             st.markdown(sparkline_svg(sparkline_data), unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 
 def render_kpi_row(kpis: list[dict]) -> None:
@@ -160,13 +152,26 @@ def render_section_header(title: str, subtitle: str = "", actions: Any = None) -
 
 
 def render_empty_state(message: str) -> None:
-    st.markdown(f'<div class="nx-panel" style="text-align:center;color:{TEXT_SECONDARY};padding:42px">{message}</div>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="nx-panel" style="text-align:center;color:{TEXT_SECONDARY};padding:42px">{message}</div>',
+        unsafe_allow_html=True,
+    )
 
 
 def apply_chart_theme(fig: Any) -> Any:
-    fig.update_layout(template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(family=FONT, color=TEXT_SECONDARY), colorway=COLORWAY, margin=dict(l=12, r=12, t=36, b=12), hoverlabel=dict(bgcolor=BG_ELEVATED, bordercolor=BORDER, font=dict(color=TEXT_PRIMARY, family=FONT)))
-    fig.update_xaxes(gridcolor=BORDER, zerolinecolor=BORDER, linecolor=BORDER, tickfont=dict(color=TEXT_MUTED))
-    fig.update_yaxes(gridcolor=BORDER, zerolinecolor=BORDER, linecolor=BORDER, tickfont=dict(color=TEXT_MUTED))
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family=FONT, color=TEXT_SECONDARY, size=11),
+        colorway=COLORWAY,
+        margin=dict(l=12, r=12, t=36, b=16),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0, font=dict(size=11, color=TEXT_SECONDARY)),
+        hovermode="x unified",
+        hoverlabel=dict(bgcolor=BG_ELEVATED, bordercolor=BORDER, font=dict(color=TEXT_PRIMARY, family=FONT, size=11)),
+    )
+    fig.update_xaxes(gridcolor="rgba(39,39,42,0.55)", zeroline=False, linecolor=BORDER, tickfont=dict(color=TEXT_MUTED, size=10), showgrid=True, nticks=8, tickangle=0)
+    fig.update_yaxes(gridcolor="rgba(39,39,42,0.5)", zeroline=False, linecolor=BORDER, tickfont=dict(color=TEXT_MUTED, size=10), showgrid=True)
     return fig
 
 
@@ -199,14 +204,20 @@ def format_percent(value: Any) -> str:
     return f"{float(value):.1f}%"
 
 
-def sparkline_svg(values: Sequence[float], color: str = ACCENT, width: int = 220, height: int = 28) -> str:
+def sparkline_svg(values: Sequence[float], color: str = ACCENT, width: int = 220, height: int = 32) -> str:
     clean = [float(v) for v in values if v is not None and not pd.isna(v)]
     if len(clean) < 2:
         return ""
     lo, hi = min(clean), max(clean)
     span = hi - lo or 1.0
-    points = " ".join(f"{i * width / (len(clean) - 1):.1f},{height - 2 - (v - lo) / span * (height - 4):.1f}" for i, v in enumerate(clean))
-    return f'<svg class="nx-spark" viewBox="0 0 {width} {height}" width="100%" height="{height}"><polyline points="{points}" fill="none" stroke="{color}" stroke-width="2" stroke-linecap="round"/></svg>'
+    # smooth with simple 3-pt average for visual clarity when many points
+    if len(clean) > 14:
+        clean = [clean[0]] + [(clean[i-1]+clean[i]+clean[i+1])/3 for i in range(1, len(clean)-1)] + [clean[-1]]
+    points = " ".join(
+        f"{i * width / (len(clean) - 1):.1f},{height - 3 - (v - lo) / span * (height - 6):.1f}"
+        for i, v in enumerate(clean)
+    )
+    return f'<svg class="nx-spark" viewBox="0 0 {width} {height}" width="100%" height="{height}" preserveAspectRatio="none"><polyline points="{points}" fill="none" stroke="{color}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/></svg>'
 
 
 def _find(frame: pd.DataFrame, *names: str) -> Optional[str]:
@@ -221,9 +232,13 @@ def _stable_customer(invoice: Any) -> str:
     return f"CUST-{zlib.crc32(str(invoice).encode()):08x}"[:13]
 
 
-@st.cache_data(show_spinner="Loading NexusBI data")
+@st.cache_data(show_spinner="Loading Lucciola data")
 def load_data() -> pd.DataFrame:
-    candidates = [DATA_DIR / "processed" / "sales_features.parquet", DATA_DIR / "processed" / "sales_processed.parquet", DATA_DIR / "augmented" / "supermarket_sales.csv"]
+    candidates = [
+        DATA_DIR / "processed" / "sales_features.parquet",
+        DATA_DIR / "processed" / "sales_processed.parquet",
+        DATA_DIR / "augmented" / "supermarket_sales.csv",
+    ]
     frame = pd.DataFrame()
     for path in candidates:
         if path.exists():
@@ -233,18 +248,63 @@ def load_data() -> pd.DataFrame:
             except Exception:
                 continue
     if frame.empty:
-        return pd.DataFrame(columns=["transaction_id", "datetime", "date", "customer_id", "product_id", "product_name", "category", "subcategory", "quantity", "unit_price", "total_amount", "profit", "payment_method", "branch", "membership_tier", "day_of_week", "hour_of_day", "is_return", "is_online_order"])
+        return pd.DataFrame(
+            columns=[
+                "transaction_id",
+                "datetime",
+                "date",
+                "customer_id",
+                "product_id",
+                "product_name",
+                "category",
+                "subcategory",
+                "quantity",
+                "unit_price",
+                "total_amount",
+                "profit",
+                "payment_method",
+                "branch",
+                "membership_tier",
+                "day_of_week",
+                "hour_of_day",
+                "is_return",
+                "is_online_order",
+            ]
+        )
     aliases = {
-        "transaction_id": ("transaction_id", "Invoice_ID"), "date": ("date", "Date"), "time": ("time", "Time"), "customer_id": ("customer_id", "Customer_ID"), "product_id": ("product_id", "Product_ID"), "product_name": ("product_name", "Product_Name"), "category": ("category", "Category", "Product_Line"), "subcategory": ("subcategory",), "quantity": ("quantity", "Quantity"), "unit_price": ("unit_price", "Unit_Price", "Selling_Price"), "total_amount": ("total_amount", "Total"), "profit": ("profit", "Profit", "Gross_Income"), "payment_method": ("payment_method", "Payment"), "branch": ("branch", "Branch"), "membership_tier": ("membership_tier", "Membership", "Customer_Type"), "day_of_week": ("day_of_week", "Day_Name"), "hour_of_day": ("hour_of_day", "Purchase_Hour"), "is_return": ("is_return",), "is_online_order": ("is_online_order",), "promotion_applied": ("promotion_applied",),
+        "transaction_id": ("transaction_id", "Invoice_ID"),
+        "date": ("date", "Date"),
+        "time": ("time", "Time"),
+        "customer_id": ("customer_id", "Customer_ID"),
+        "product_id": ("product_id", "Product_ID"),
+        "product_name": ("product_name", "Product_Name"),
+        "category": ("category", "Category", "Product_Line"),
+        "subcategory": ("subcategory",),
+        "quantity": ("quantity", "Quantity"),
+        "unit_price": ("unit_price", "Unit_Price", "Selling_Price"),
+        "total_amount": ("total_amount", "Total"),
+        "profit": ("profit", "Profit", "Gross_Income"),
+        "payment_method": ("payment_method", "Payment"),
+        "branch": ("branch", "Branch"),
+        "membership_tier": ("membership_tier", "Membership", "Customer_Type"),
+        "day_of_week": ("day_of_week", "Day_Name"),
+        "hour_of_day": ("hour_of_day", "Purchase_Hour"),
+        "is_return": ("is_return",),
+        "is_online_order": ("is_online_order",),
+        "promotion_applied": ("promotion_applied",),
     }
     out = pd.DataFrame(index=frame.index)
     for target, names in aliases.items():
         source = _find(frame, *names)
         out[target] = frame[source].astype(object) if source else pd.NA
-    out["transaction_id"] = out["transaction_id"].fillna(pd.Series(range(len(out)), index=out.index).map(lambda n: f"TXN-{n:08d}"))
+    out["transaction_id"] = out["transaction_id"].fillna(
+        pd.Series(range(len(out)), index=out.index).map(lambda n: f"TXN-{n:08d}")
+    )
     out["date"] = pd.to_datetime(out["date"], errors="coerce")
     time_values = out["time"].astype("string") if "time" in out else pd.Series("00:00:00", index=out.index)
-    out["datetime"] = pd.to_datetime(out["date"].dt.strftime("%Y-%m-%d") + " " + time_values.fillna("00:00:00"), errors="coerce")
+    out["datetime"] = pd.to_datetime(
+        out["date"].dt.strftime("%Y-%m-%d") + " " + time_values.fillna("00:00:00"), errors="coerce"
+    )
     out["date"] = out["datetime"].dt.normalize()
     out["customer_id"] = out["customer_id"].fillna(out["transaction_id"].map(_stable_customer))
     out["product_id"] = out["product_id"].fillna(out["product_name"]).fillna("UNKNOWN")
@@ -267,9 +327,19 @@ def load_data() -> pd.DataFrame:
 def load_products() -> pd.DataFrame:
     path = DATA_DIR / "augmented" / "products.csv"
     if not path.exists():
-        return pd.DataFrame(columns=["product_id", "name", "category", "unit_cost", "unit_price", "stock", "reorder_level"])
+        return pd.DataFrame(
+            columns=["product_id", "name", "category", "unit_cost", "unit_price", "stock", "reorder_level"]
+        )
     raw = pd.read_csv(path)
-    mapping = {"product_id": ("product_id", "Product_ID"), "name": ("name", "Product_Name"), "category": ("category", "Category"), "unit_cost": ("unit_cost", "Cost"), "unit_price": ("unit_price", "Selling_Price"), "stock": ("stock", "Stock"), "reorder_level": ("reorder_level", "Reorder_Level")}
+    mapping = {
+        "product_id": ("product_id", "Product_ID"),
+        "name": ("name", "Product_Name"),
+        "category": ("category", "Category"),
+        "unit_cost": ("unit_cost", "Cost"),
+        "unit_price": ("unit_price", "Selling_Price"),
+        "stock": ("stock", "Stock"),
+        "reorder_level": ("reorder_level", "Reorder_Level"),
+    }
     out = pd.DataFrame(index=raw.index)
     for target, aliases in mapping.items():
         source = _find(raw, *aliases)
@@ -301,7 +371,9 @@ def render_nav(active: str = "Overview") -> None:
 
 
 def currency(value: Any, compact: bool = True) -> str:
-    return format_currency(value) if compact else ("—" if value is None or pd.isna(value) else f"${float(value):,.2f}")
+    return format_currency(value) if compact else (
+        "—" if value is None or pd.isna(value) else f"${float(value):,.2f}"
+    )
 
 
 def fmt_int(value: Any) -> str:
@@ -315,7 +387,18 @@ def pct_change(current: Any, previous: Any) -> Optional[float]:
 
 
 def kpi_cards(cards: Sequence[dict]) -> None:
-    render_kpi_row([{ "label": c.get("label", ""), "value": c.get("value", "—"), "delta": c.get("delta"), "direction": "up" if (c.get("delta") or 0) >= 0 else "down", "sparkline_data": c.get("spark") } for c in cards])
+    render_kpi_row(
+        [
+            {
+                "label": c.get("label", ""),
+                "value": c.get("value", "—"),
+                "delta": c.get("delta"),
+                "direction": "up" if (c.get("delta") or 0) >= 0 else "down",
+                "sparkline_data": c.get("spark"),
+            }
+            for c in cards
+        ]
+    )
 
 
 def chart(fig: Any, height: Optional[int] = None, **kwargs: Any) -> None:
@@ -338,5 +421,8 @@ def inline_badge(text: str, tone: str = "info") -> str:
     return f'<span class="nx-badge nx-badge-{tone}">{text}</span>'
 
 
-def footer(note: str = "NexusBI v2.1.0") -> None:
-    st.markdown(f'<div style="border-top:1px solid {BORDER};margin-top:32px;padding-top:16px;color:{TEXT_MUTED};font-size:.72rem">{note}</div>', unsafe_allow_html=True)
+def footer(note: str = "Lucciola v2.1.0") -> None:
+    st.markdown(
+        f'<div style="border-top:1px solid {BORDER};margin-top:32px;padding-top:16px;color:{TEXT_MUTED};font-size:.72rem">{note}</div>',
+        unsafe_allow_html=True,
+    )
